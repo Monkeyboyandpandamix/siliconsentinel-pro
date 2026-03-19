@@ -38,6 +38,10 @@ import { OrchestrationStatus } from './components/OrchestrationStatus';
 import { SettingsPanel } from './components/SettingsPanel';
 import { AIAssistant } from './components/AIAssistant';
 import { BenchpressList } from './components/BenchpressList';
+import { FabOpsPanel } from './components/FabOpsPanel';
+import { ProcessControlPanel } from './components/ProcessControlPanel';
+import { DigitalTwinOpsPanel } from './components/DigitalTwinOpsPanel';
+import { SupplyResiliencePanel } from './components/SupplyResiliencePanel';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const STEPS = [
@@ -103,18 +107,6 @@ export default function App() {
     if (!architecture) return;
     setLoading(true);
     await createOrchestrationOrder("Digital Twin Simulation", { architecture });
-    
-    // Ensure benchmarks exist for the Benchpress list
-    if (!architecture.benchmarks || architecture.benchmarks.length === 0) {
-      const mockBenchmarks = [
-        { name: 'Compute Density', score: 92, unit: 'GFLOPS/mm²', status: 'OPTIMAL' as const },
-        { name: 'Thermal Efficiency', score: 78, unit: '%', status: 'WARNING' as const },
-        { name: 'Signal Integrity', score: 94, unit: 'dB', status: 'OPTIMAL' as const },
-        { name: 'IO Bandwidth', score: 12.4, unit: 'Gbps', status: 'OPTIMAL' as const },
-        { name: 'Power Leakage', score: 1.2, unit: 'mW', status: 'CRITICAL' as const }
-      ];
-      setArchitecture({ ...architecture, benchmarks: mockBenchmarks });
-    }
 
     setTimeout(() => {
       setLoading(false);
@@ -259,7 +251,7 @@ export default function App() {
           <div className="flex items-center gap-4">
              <div className="px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 flex items-center gap-2">
                 <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                <span className="text-[10px] font-mono text-zinc-400 uppercase">Open API Connected</span>
+                <span className="text-[10px] font-mono text-zinc-400 uppercase">IBM Manufacturing Copilot Connected</span>
              </div>
              <Settings 
                size={18} 
@@ -309,7 +301,7 @@ export default function App() {
                 <div className="space-y-6">
                   <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl space-y-6">
                     <h2 className="text-2xl font-bold">Describe Your Semiconductor Need</h2>
-                    <p className="text-zinc-400 text-sm">Our AI Co-Pilot uses watsonx.ai to transform your natural language requirements into a full architecture blueprint.</p>
+                    <p className="text-zinc-400 text-sm">Define the product, then evaluate manufacturability, predictive maintenance risk, process drift, and supply resilience in one semiconductor workflow.</p>
                     
                     <textarea 
                       value={prompt}
@@ -364,7 +356,7 @@ export default function App() {
                   <div className="flex justify-between items-end">
                     <div>
                       <h2 className="text-2xl font-bold">{architecture.name}</h2>
-                      <p className="text-zinc-400 text-sm">Architecture Blueprint Generated via AI Co-Pilot</p>
+                      <p className="text-zinc-400 text-sm">Architecture blueprint with manufacturing-track readiness signals</p>
                     </div>
                     <div className="flex items-center gap-6">
                         {settings.simulatorMode && (
@@ -470,7 +462,7 @@ export default function App() {
                    <div className="flex justify-between items-end">
                     <div>
                       <h2 className="text-2xl font-bold">Simulation Results</h2>
-                      <p className="text-zinc-400 text-sm">Thermal & Power Analysis of {architecture.name}</p>
+                      <p className="text-zinc-400 text-sm">Thermal, fab operations, and process intelligence for {architecture.name}</p>
                     </div>
                     <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2">
                         <ShieldCheck className="text-emerald-500" size={16} />
@@ -481,6 +473,13 @@ export default function App() {
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <ThermalHeatmap architecture={architecture} />
                     <BenchpressList architecture={architecture} />
+                  </div>
+
+                  <DigitalTwinOpsPanel architecture={architecture} />
+
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    <FabOpsPanel architecture={architecture} />
+                    <ProcessControlPanel architecture={architecture} />
                   </div>
 
                   <div className="flex gap-4">
@@ -498,7 +497,7 @@ export default function App() {
                   <div className="flex justify-between items-end">
                     <div>
                       <h2 className="text-2xl font-bold">Supply Chain Intelligence</h2>
-                      <p className="text-zinc-400 text-sm">BOM & Manufacturing Plan for {architecture?.name}</p>
+                      <p className="text-zinc-400 text-sm">BOM, allocation planning, and manufacturing response plan for {architecture?.name}</p>
                     </div>
                     <div className="flex gap-2">
                         <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">Export CSV</button>
@@ -537,6 +536,8 @@ export default function App() {
                   </div>
 
                   <BOMTable items={bom} />
+
+                  {architecture && <SupplyResiliencePanel architecture={architecture} bom={bom} />}
 
                   <div className="space-y-4">
                     <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest">Geopolitical Risk & Supplier Concentration</h3>
@@ -594,15 +595,15 @@ export default function App() {
             <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest mb-4">System Health</h3>
             <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">watsonx.ai Engine</span>
+                    <span className="text-xs text-zinc-400">IBM Assistant Embed</span>
                     <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
                 </div>
                 <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">Digital Twin Core</span>
+                    <span className="text-xs text-zinc-400">Fab Digital Twin Core</span>
                     <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
                 </div>
                 <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">Digi-Key API</span>
+                    <span className="text-xs text-zinc-400">Supply Resilience Engine</span>
                     <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
                 </div>
             </div>
@@ -612,9 +613,9 @@ export default function App() {
             <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-700">
                 <Zap size={120} />
             </div>
-            <h4 className="font-bold text-indigo-400 mb-2">Pro Tip</h4>
+            <h4 className="font-bold text-indigo-400 mb-2">Fab Ops Tip</h4>
             <p className="text-xs text-zinc-400 leading-relaxed">
-                Use natural language to specify power constraints. For example: "Optimize for ultra-low sleep current below 1uA."
+                Include production goals in the prompt, for example: "Optimize for 7nm edge inference with low chamber drift risk and resilient memory sourcing."
             </p>
           </div>
         </div>
@@ -623,7 +624,7 @@ export default function App() {
       {/* Footer */}
       <footer className="border-t border-zinc-800 py-8 mt-12">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest">© 2026 SiliconSentinel Pro · Powered by Open APIs & Gemini AI</p>
+          <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest">© 2026 SiliconSentinel Pro · Powered by IBM chat, digital twin analytics, and manufacturing intelligence</p>
           <div className="flex gap-6">
             <a href="#" className="text-zinc-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">Documentation</a>
             <a href="#" className="text-zinc-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">API Reference</a>

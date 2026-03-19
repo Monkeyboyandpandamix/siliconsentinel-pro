@@ -1,5 +1,10 @@
 export interface ChipArchitecture {
   name: string;
+  benchmarkSummary?: {
+    passRate: number;
+    readiness: 'READY' | 'WATCH' | 'BLOCKED';
+    topConcern: string;
+  };
   blocks: {
     id: string;
     name: string;
@@ -16,12 +21,19 @@ export interface ChipArchitecture {
   estimatedYield: number;
   totalPower: number;
   totalArea: number;
-  benchmarks: {
-    name: string;
-    score: number;
-    unit: string;
-    status: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
-  }[];
+  benchmarks: BenchmarkMetric[];
+}
+
+export interface BenchmarkMetric {
+  name: string;
+  score: number;
+  unit: string;
+  status: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
+  target: string;
+  category: 'performance' | 'thermal' | 'yield' | 'signal' | 'supply' | 'sustainability';
+  trend: 'UP' | 'DOWN' | 'STABLE';
+  delta: number;
+  note: string;
 }
 
 export interface SimulationResult {

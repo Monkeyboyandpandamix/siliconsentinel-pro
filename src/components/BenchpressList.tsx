@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChipArchitecture } from '../types';
-import { Gauge, AlertTriangle, CheckCircle2, XCircle, Activity } from 'lucide-react';
+import { Gauge, AlertTriangle, CheckCircle2, XCircle, Activity, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 
 interface Props {
   architecture: ChipArchitecture;
@@ -8,6 +8,7 @@ interface Props {
 
 export const BenchpressList: React.FC<Props> = ({ architecture }) => {
   const benchmarks = architecture.benchmarks || [];
+  const summary = architecture.benchmarkSummary;
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -35,6 +36,17 @@ export const BenchpressList: React.FC<Props> = ({ architecture }) => {
     }
   };
 
+  const getTrendIcon = (trend: string) => {
+    switch (trend) {
+      case 'UP':
+        return <TrendingUp size={12} className="text-emerald-400" />;
+      case 'DOWN':
+        return <TrendingDown size={12} className="text-red-400" />;
+      default:
+        return <Minus size={12} className="text-zinc-500" />;
+    }
+  };
+
   return (
     <div className="bg-zinc-900 rounded-2xl border border-zinc-800 p-6">
       <div className="flex items-center gap-3 mb-6">
@@ -46,6 +58,23 @@ export const BenchpressList: React.FC<Props> = ({ architecture }) => {
           <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Performance Metrics & Benchmarks</p>
         </div>
       </div>
+
+      {summary && (
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+            <p className="text-[9px] text-zinc-500 font-mono uppercase">Pass Rate</p>
+            <p className="text-lg font-bold text-emerald-400">{summary.passRate}%</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+            <p className="text-[9px] text-zinc-500 font-mono uppercase">Readiness</p>
+            <p className="text-lg font-bold text-indigo-400">{summary.readiness}</p>
+          </div>
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
+            <p className="text-[9px] text-zinc-500 font-mono uppercase">Top Concern</p>
+            <p className="text-xs font-semibold text-zinc-200">{summary.topConcern}</p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {benchmarks.length === 0 ? (
@@ -77,6 +106,19 @@ export const BenchpressList: React.FC<Props> = ({ architecture }) => {
                 </span>
               </div>
 
+              <div className="mt-2 flex items-center justify-between text-[10px] font-mono">
+                <span className="text-zinc-500 uppercase">{benchmark.category}</span>
+                <span className="flex items-center gap-1 text-zinc-400">
+                  {getTrendIcon(benchmark.trend)}
+                  Δ {benchmark.delta > 0 ? '+' : ''}{benchmark.delta}
+                </span>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between gap-4 text-[10px] text-zinc-500">
+                <span>Target {benchmark.target}</span>
+                <span className="text-right">{benchmark.note}</span>
+              </div>
+
               {/* Visual Progress Bar */}
               <div className="mt-3 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
                 <div 
@@ -94,11 +136,11 @@ export const BenchpressList: React.FC<Props> = ({ architecture }) => {
 
       <div className="mt-6 pt-6 border-t border-zinc-800">
         <div className="flex justify-between items-center text-[8px] font-mono text-zinc-500 uppercase tracking-widest">
-          <span>Simulation Accuracy</span>
-          <span className="text-emerald-500">99.4%</span>
+          <span>Ops Readiness Confidence</span>
+          <span className="text-emerald-500">{summary?.passRate || 92}%</span>
         </div>
         <div className="mt-2 h-1 w-full bg-zinc-800 rounded-full overflow-hidden">
-          <div className="h-full w-[99.4%] bg-emerald-500 rounded-full" />
+          <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${summary?.passRate || 92}%` }} />
         </div>
       </div>
     </div>

@@ -11,7 +11,7 @@ export const OrchestrationStatus: React.FC<Props> = ({ orders }) => {
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
       <div className="flex items-center gap-2 mb-4">
         <Activity size={16} className="text-indigo-500" />
-        <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest">Open Supply Chain Orchestration Log</h3>
+        <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest">Manufacturing Agent Orchestration Log</h3>
       </div>
       <div className="space-y-3">
         {orders.length === 0 && (

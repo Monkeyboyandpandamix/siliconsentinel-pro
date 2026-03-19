@@ -1,56 +1,64 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Minimize2, Maximize2, X } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
-import Markdown from 'react-markdown';
+import React, { useEffect, useState } from 'react';
+import { Bot, ExternalLink, Loader2, Minimize2, Maximize2, X } from 'lucide-react';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
+const IBM_CHAT_ROOT_ID = 'wxo-chat-root';
+const IBM_HOST_URL = 'https://us-south.watson-orchestrate.cloud.ibm.com';
+const IBM_LOADER_ID = 'wxo-loader-script';
 
 export const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: 'Hello! I am your SiliconSentinel AI Assistant. How can I help you with your semiconductor lifecycle today?' }
-  ]);
-  const [loading, setLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (!isOpen || isMinimized || typeof window === 'undefined') {
+      return;
     }
-  }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    window.wxOConfiguration = {
+      orchestrationID: 'f459230554db416db8c23a3534ec4e8b_c8a9d776-460e-4c9a-b55f-0a2556febf8e',
+      hostURL: IBM_HOST_URL,
+      rootElementID: IBM_CHAT_ROOT_ID,
+      deploymentPlatform: 'ibmcloud',
+      crn: 'crn:v1:bluemix:public:watsonx-orchestrate:us-south:a/f459230554db416db8c23a3534ec4e8b:c8a9d776-460e-4c9a-b55f-0a2556febf8e::',
+      chatOptions: {
+        agentId: 'c4e8c7f3-51da-4cc7-a9c3-9e055bbd7332',
+      },
+    };
 
-    const userMsg = input.trim();
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    setLoading(true);
+    const existingScript = document.getElementById(IBM_LOADER_ID) as HTMLScriptElement | null;
+    const initChat = () => {
+      try {
+        window.wxoLoader?.init();
+        setIsLoading(false);
+        setLoadError(null);
+      } catch (error) {
+        console.error('IBM chat init failed:', error);
+        setIsLoading(false);
+        setLoadError('IBM assistant failed to initialize.');
+      }
+    };
 
-    try {
-      const chat = ai.chats.create({
-        model: "gemini-3-flash-preview",
-        config: {
-          systemInstruction: "You are an expert semiconductor architecture and supply chain assistant. You help users design chips, analyze thermal behavior, and manage supply chain risks. Be professional, technical, and concise.",
-        },
-      });
-
-      const response = await chat.sendMessage({ message: userMsg });
-      setMessages(prev => [...prev, { role: 'assistant', content: response.text || "I'm sorry, I couldn't process that." }]);
-    } catch (error) {
-      console.error("AI Error:", error);
-      setMessages(prev => [...prev, { role: 'assistant', content: "Error connecting to AI service. Please check your configuration." }]);
-    } finally {
-      setLoading(false);
+    if (existingScript) {
+      initChat();
+      return;
     }
-  };
+
+    setIsLoading(true);
+    setLoadError(null);
+
+    const script = document.createElement('script');
+    script.id = IBM_LOADER_ID;
+    script.src = `${IBM_HOST_URL}/wxochat/wxoLoader.js?embed=true`;
+    script.async = true;
+    script.addEventListener('load', initChat);
+    script.addEventListener('error', () => {
+      setIsLoading(false);
+      setLoadError('IBM assistant script failed to load.');
+    });
+    document.head.appendChild(script);
+  }, [isMinimized, isOpen]);
 
   if (!isOpen) {
     return (
@@ -66,7 +74,6 @@ export const AIAssistant: React.FC = () => {
 
   return (
     <div className={`fixed bottom-6 right-6 w-80 md:w-96 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 flex flex-col transition-all overflow-hidden ${isMinimized ? 'h-14' : 'h-[500px]'}`}>
-      {/* Header */}
       <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/50">
         <div className="flex items-center gap-2">
           <Bot size={18} className="text-indigo-400" />
@@ -84,49 +91,38 @@ export const AIAssistant: React.FC = () => {
 
       {!isMinimized && (
         <>
-          {/* Messages */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-zinc-800">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                <div className={`max-w-[85%] p-3 rounded-2xl text-xs leading-relaxed ${
-                  msg.role === 'user' 
-                    ? 'bg-indigo-600 text-white rounded-tr-none' 
-                    : 'bg-zinc-800 text-zinc-200 rounded-tl-none border border-zinc-700'
-                }`}>
-                  <div className="markdown-body">
-                    <Markdown>{msg.content}</Markdown>
+          <div className="flex-1 overflow-hidden bg-zinc-950/30">
+            {(isLoading || loadError) && (
+              <div className="absolute inset-x-4 top-16 z-10 rounded-xl border border-zinc-800 bg-zinc-950/95 p-3 text-xs text-zinc-300 shadow-xl">
+                {isLoading && (
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin text-indigo-400" />
+                    <span>Loading IBM assistant...</span>
                   </div>
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-zinc-800 p-3 rounded-2xl rounded-tl-none border border-zinc-700">
-                  <Loader2 size={16} className="animate-spin text-indigo-400" />
-                </div>
+                )}
+                {loadError && (
+                  <div className="space-y-2">
+                    <p>{loadError}</p>
+                    <a
+                      href={`${IBM_HOST_URL}/wxochat/wxoLoader.js?embed=true`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300"
+                    >
+                      <ExternalLink size={12} />
+                      <span>Open loader URL</span>
+                    </a>
+                  </div>
+                )}
               </div>
             )}
+            <div id={IBM_CHAT_ROOT_ID} className="h-full w-full" />
+            {!isLoading && !loadError && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-zinc-900 to-transparent" />
+            )}
           </div>
-
-          {/* Input */}
-          <div className="p-4 border-t border-zinc-800 bg-zinc-950/30">
-            <div className="relative">
-              <input 
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ask anything..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-2.5 pl-4 pr-10 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-              />
-              <button 
-                onClick={handleSend}
-                disabled={!input.trim() || loading}
-                className="absolute right-2 top-1.5 p-1.5 text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-colors"
-              >
-                <Send size={16} />
-              </button>
-            </div>
+          <div className="border-t border-zinc-800 bg-zinc-950/30 px-4 py-3 text-[11px] text-zinc-500">
+            IBM watsonx Orchestrate embedded assistant
           </div>
         </>
       )}
