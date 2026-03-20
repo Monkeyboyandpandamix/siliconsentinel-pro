@@ -4,30 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SiliconSentinel Pro — Semiconductor Lifecycle Platform</title>
-    <script>
-      window.wxOConfiguration = {
-        orchestrationID: "f459230554db416db8c23a3534ec4e8b_c8a9d776-460e-4c9a-b55f-0a2556febf8e",
-        hostURL: "https://us-south.watson-orchestrate.cloud.ibm.com",
-        rootElementID: "wxo-chat-root",
-        deploymentPlatform: "ibmcloud",
-        crn: "crn:v1:bluemix:public:watsonx-orchestrate:us-south:a/f459230554db416db8c23a3534ec4e8b:c8a9d776-460e-4c9a-b55f-0a2556febf8e::",
-        chatOptions: {
-          agentId: "c4e8c7f3-51da-4cc7-a9c3-9e055bbd7332",
-        }
-      };
-      setTimeout(function () {
-        var script = document.createElement('script');
-        script.src = window.wxOConfiguration.hostURL + '/wxochat/wxoLoader.js?embed=true';
-        script.addEventListener('load', function () {
-          if (typeof wxoLoader !== 'undefined') wxoLoader.init();
-        });
-        document.head.appendChild(script);
-      }, 0);
-    </script>
   </head>
   <body>
     <div id="root"></div>
-    <div id="wxo-chat-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
