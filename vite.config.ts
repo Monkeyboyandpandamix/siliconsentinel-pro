@@ -23,6 +23,8 @@ export default defineConfig(({mode}) => {
           '**/.cache/**',
           '**/node_modules/**',
           '**/.git/**',
+          '**/.venv*/**',
+          '**/venv*/**',
           '**/uploads/**',
           '**/*.db',
           '**/*.db-wal',

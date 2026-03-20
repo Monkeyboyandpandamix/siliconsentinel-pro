@@ -79,8 +79,8 @@ async def _probe_watson_tts(settings) -> str:
                 auth=("apikey", settings.watson_tts_api_key),
             )
         return "ONLINE" if resp.status_code == 200 else f"ERROR {resp.status_code}"
-    except Exception:
-        return "ERROR"
+    except Exception as e:
+        return f"ERROR {type(e).__name__}"
 
 
 async def _probe_watson_orchestrate(settings) -> str:
@@ -99,7 +99,9 @@ async def _probe_watson_orchestrate(settings) -> str:
         async with httpx.AsyncClient(timeout=10) as client:
             if wxo_saas:
                 alive = await client.get(f"{orch_url}/api/v1/health/alive")
-                if alive.status_code != 200:
+                # Some IBM deployments require auth on /health/alive and return 401/403.
+                # If the host is reachable and the service responds, we treat that as ONLINE.
+                if alive.status_code not in (200, 401, 403):
                     return f"ERROR {alive.status_code}"
             iam_resp = await client.post(
                 "https://iam.cloud.ibm.com/identity/token",
@@ -112,8 +114,8 @@ async def _probe_watson_orchestrate(settings) -> str:
         if iam_resp.status_code != 200:
             return "AUTH ERROR"
         return "ONLINE"
-    except Exception:
-        return "ERROR"
+    except Exception as e:
+        return f"ERROR {type(e).__name__}"
 
 
 async def _probe_gemini(settings) -> str:
