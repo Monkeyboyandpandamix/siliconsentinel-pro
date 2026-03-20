@@ -1,2 +1,122 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
+
+/* High Contrast Mode Overrides */
+.theme-high-contrast {
+  /* Enforce black background everywhere */
+  background-color: #000 !important;
+  color: #FFF !important;
+}
+
+/* Base text overrides */
+.theme-high-contrast .text-zinc-500,
+.theme-high-contrast .text-zinc-600,
+.theme-high-contrast .text-zinc-400 {
+  color: #FFFF00 !important;
+}
+
+.theme-high-contrast .text-zinc-100,
+.theme-high-contrast .text-zinc-200,
+.theme-high-contrast .text-zinc-300 {
+  color: #FFFFFF !important;
+}
+
+/* Accent colors */
+.theme-high-contrast .text-indigo-400,
+.theme-high-contrast .text-indigo-500,
+.theme-high-contrast .text-indigo-600 {
+  color: #00FFFF !important;
+}
+
+/* Backgrounds */
+.theme-high-contrast .bg-zinc-800,
+.theme-high-contrast .bg-zinc-900,
+.theme-high-contrast .bg-zinc-950,
+.theme-high-contrast .bg-zinc-900\/50,
+.theme-high-contrast .bg-zinc-900\/30,
+.theme-high-contrast .bg-zinc-950\/50,
+.theme-high-contrast .bg-black\/60 {
+  background-color: #000 !important;
+  border: 1px solid #FFF !important;
+}
+
+/* Interactive elements */
+.theme-high-contrast .bg-indigo-600,
+.theme-high-contrast .bg-indigo-500 {
+  background-color: #000 !important;
+  border: 2px solid #00FFFF !important;
+  color: #00FFFF !important;
+}
+
+.theme-high-contrast .bg-indigo-600:hover,
+.theme-high-contrast .bg-indigo-500:hover,
+.theme-high-contrast .hover\:bg-indigo-500:hover {
+  background-color: #00FFFF !important;
+  color: #000 !important;
+}
+
+/* Emerald accents */
+.theme-high-contrast .bg-emerald-500\/10,
+.theme-high-contrast .bg-emerald-500 {
+  background-color: #000 !important;
+  border: 2px solid #00FF00 !important;
+  color: #00FF00 !important;
+}
+
+.theme-high-contrast .text-emerald-500,
+.theme-high-contrast .text-emerald-400 {
+  color: #00FF00 !important;
+}
+
+/* Amber accents */
+.theme-high-contrast .bg-amber-500\/10,
+.theme-high-contrast .bg-amber-500 {
+  background-color: #000 !important;
+  border: 2px solid #FFFF00 !important;
+  color: #FFFF00 !important;
+}
+
+.theme-high-contrast .text-amber-500,
+.theme-high-contrast .text-amber-400 {
+  color: #FFFF00 !important;
+}
+
+/* Red accents */
+.theme-high-contrast .bg-red-500\/10,
+.theme-high-contrast .bg-red-500 {
+  background-color: #000 !important;
+  border: 2px solid #FF0000 !important;
+  color: #FF0000 !important;
+}
+
+.theme-high-contrast .text-red-500 {
+  color: #FF0000 !important;
+}
+
+/* Borders */
+.theme-high-contrast .border-zinc-800,
+.theme-high-contrast .border-zinc-800\/50,
+.theme-high-contrast .border-zinc-700 {
+  border-color: #FFF !important;
+}
+
+.theme-high-contrast .border-indigo-500,
+.theme-high-contrast .border-indigo-500\/20,
+.theme-high-contrast .border-indigo-500\/30 {
+  border-color: #00FFFF !important;
+}
+
+.theme-high-contrast .border-emerald-500,
+.theme-high-contrast .border-emerald-500\/20 {
+  border-color: #00FF00 !important;
+}
+
+/* SVGs */
+.theme-high-contrast svg {
+  color: currentColor !important;
+}
+
+/* Shadows */
+.theme-high-contrast * {
+  box-shadow: none !important;
+}
