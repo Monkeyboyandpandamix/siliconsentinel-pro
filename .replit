@@ -58,3 +58,6 @@ channel = "stable-25_05"
 
 [userenv.shared]
 WATSON_TTS_URL = "https://api.us-east.text-to-speech.watson.cloud.ibm.com/instances/9f6ed56b-4413-4674-8b27-87f710bea26d"
+WATSON_ORCHESTRATE_URL = "https://us-south.watson-orchestrate.cloud.ibm.com"
+WATSON_ORCHESTRATE_INSTANCE_ID = "c8a9d776-460e-4c9a-b55f-0a2556febf8e"
+WATSON_ORCHESTRATE_AGENT_ID = "c4e8c7f3-51da-4cc7-a9c3-9e055bbd7332"

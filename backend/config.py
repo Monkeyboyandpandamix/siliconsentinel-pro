@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     watson_orchestrate_api_key: str = ""
     watson_orchestrate_url: str = ""
     watson_orchestrate_instance_id: str = ""
+    watson_orchestrate_agent_id: str = ""
     upload_dir: str = "uploads"
     cors_origins: list[str] = ["*"]
 

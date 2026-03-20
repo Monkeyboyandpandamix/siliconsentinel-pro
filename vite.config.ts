@@ -20,12 +20,15 @@ export default defineConfig(({mode}) => {
       watch: {
         ignored: [
           '**/.local/**',
+          '**/.cache/**',
           '**/node_modules/**',
           '**/.git/**',
           '**/uploads/**',
           '**/*.db',
           '**/*.db-wal',
           '**/*.db-shm',
+          '**/.replit',
+          '**/replit.nix',
         ],
       },
       proxy: {

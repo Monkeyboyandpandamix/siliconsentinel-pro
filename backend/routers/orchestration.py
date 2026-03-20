@@ -155,43 +155,72 @@ def build_context_prefix(ctx: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-async def _call_watson_orchestrate(message: str, context_prefix: str, settings) -> str:
-    api_key = settings.watson_orchestrate_api_key
-    orch_url = settings.watson_orchestrate_url
-    instance_id = settings.watson_orchestrate_instance_id
-
-    if not api_key or not orch_url or not instance_id:
-        raise ValueError("Watson Orchestrate not configured")
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        iam_resp = await client.post(
+async def _get_iam_token(api_key: str) -> str:
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
             "https://iam.cloud.ibm.com/identity/token",
             data={"apikey": api_key, "grant_type": "urn:ibm:params:oauth:grant-type:apikey"},
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        iam_resp.raise_for_status()
-        token = iam_resp.json()["access_token"]
+        resp.raise_for_status()
+        return resp.json()["access_token"]
 
-        base = orch_url.rstrip("/")
-        sess_resp = await client.post(
-            f"{base}/instances/{instance_id}/v2/assistants/default/sessions",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        )
-        if sess_resp.status_code not in (200, 201):
-            raise ValueError(f"Session error {sess_resp.status_code}: {sess_resp.text}")
-        session_id = sess_resp.json()["session_id"]
+
+async def _call_watson_orchestrate(message: str, context_prefix: str, settings) -> str:
+    api_key = settings.watson_orchestrate_api_key
+    orch_url = settings.watson_orchestrate_url.rstrip("/")
+    instance_id = settings.watson_orchestrate_instance_id
+    agent_id = settings.watson_orchestrate_agent_id
+
+    if not api_key:
+        raise ValueError("Watson Orchestrate API key not configured")
+    if not orch_url or not instance_id:
+        raise ValueError("Watson Orchestrate URL/instance not configured")
+
+    token = await _get_iam_token(api_key)
+
+    # Watson Orchestrate agent session API
+    base = f"{orch_url}/instances/{instance_id}"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Build session endpoint — try agent-specific path first, fall back to default assistant
+    session_paths = []
+    if agent_id:
+        session_paths.append(f"{base}/v2/agents/{agent_id}/sessions")
+    session_paths.append(f"{base}/v2/assistants/default/sessions")
+
+    session_id = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        for sess_path in session_paths:
+            sess_resp = await client.post(sess_path, headers=headers)
+            if sess_resp.status_code in (200, 201):
+                session_id = sess_resp.json().get("session_id")
+                break
+
+        if not session_id:
+            raise ValueError(f"Could not create Watson Orchestrate session")
 
         full_message = f"{context_prefix}\nUser question: {message}"
-        msg_resp = await client.post(
-            f"{base}/instances/{instance_id}/v2/assistants/default/sessions/{session_id}/message",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"input": {"text": full_message}},
-        )
-        msg_resp.raise_for_status()
-        data = msg_resp.json()
-        output = data.get("output", {})
-        texts = [r.get("text", "") for r in output.get("generic", []) if r.get("response_type") == "text"]
-        return " ".join(texts).strip() or "No response from agent."
+
+        # Try agent-specific message endpoint
+        msg_paths = []
+        if agent_id:
+            msg_paths.append(f"{base}/v2/agents/{agent_id}/sessions/{session_id}/message")
+        msg_paths.append(f"{base}/v2/assistants/default/sessions/{session_id}/message")
+
+        for msg_path in msg_paths:
+            msg_resp = await client.post(
+                msg_path,
+                headers=headers,
+                json={"input": {"text": full_message}},
+            )
+            if msg_resp.status_code == 200:
+                data = msg_resp.json()
+                output = data.get("output", {})
+                texts = [r.get("text", "") for r in output.get("generic", []) if r.get("response_type") == "text"]
+                return " ".join(texts).strip() or "No response from agent."
+
+        raise ValueError(f"Watson Orchestrate message failed")
 
 
 def _physics_fallback_response(message: str, ctx: dict[str, Any]) -> str:
@@ -253,10 +282,14 @@ def _physics_fallback_response(message: str, ctx: dict[str, Any]) -> str:
             f"across {arch.get('total_area_mm2', 'N/A')} mm² die area. "
             f"Total power budget: {arch.get('total_power_mw', 'N/A')} mW."
         )
+    if not ctx:
+        return (
+            "Hello! I'm your SiliconSentinel AI Co-Pilot. "
+            "Generate a chip architecture first to unlock full analysis — then ask me about power, thermals, yield, BOM costs, timing, or supply chain trade-offs."
+        )
     return (
         "I can help you analyze your chip design. Ask me about power consumption, "
-        "thermal profile, yield predictions, BOM costs, timing, or architecture trade-offs. "
-        "For full AI-assisted answers, configure the IBM Watson Orchestrate integration."
+        "thermal profile, yield predictions, BOM costs, timing, or architecture trade-offs."
     )
 
 
@@ -268,9 +301,6 @@ async def orchestrate_chat(req: ChatRequest):
     try:
         reply = await _call_watson_orchestrate(req.message, context_prefix, settings)
         return ChatResponse(reply=reply, source="watson_orchestrate")
-    except Exception as e:
-        err = str(e)
-        if "not configured" not in err.lower():
-            pass
+    except Exception:
         reply = _physics_fallback_response(req.message, req.context)
         return ChatResponse(reply=reply, source="physics_fallback")
