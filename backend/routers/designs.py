@@ -5,7 +5,7 @@ from sqlalchemy import select
 from backend.database import get_db
 from backend.limiter import limiter
 from backend.models.design import Design
-from backend.schemas.design import DesignCreateRequest, DesignResponse
+from backend.schemas.design import DesignCreateRequest, DesignResponse, ApplyInstructionRequest
 from backend.services.design_copilot import DesignCopilotService
 from backend.services.orchestrator import OrchestratorService
 
@@ -63,3 +63,20 @@ async def get_design(design_id: int, db: AsyncSession = Depends(get_db)):
         status=design.status,
         created_at=design.created_at,
     )
+
+
+@router.post("/{design_id}/apply-instruction", response_model=DesignResponse)
+@limiter.limit("10/minute")
+async def apply_instruction(
+    request: Request,
+    design_id: int,
+    req: ApplyInstructionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    service = DesignCopilotService(db)
+    # Load design
+    result = await db.execute(select(Design).where(Design.id == design_id))
+    design = result.scalar_one_or_none()
+    if not design:
+        raise HTTPException(status_code=404, detail="Design not found")
+    return await service.apply_instruction_to_design(design, req.instruction)

@@ -1,6 +1,8 @@
 """Module 1: AI-Driven Semiconductor Co-Pilot service."""
 
 import logging
+import math
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.design import Design
@@ -269,3 +271,203 @@ class DesignCopilotService:
         )
 
         return scores
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Deterministic "apply changes" support for the AI sidebar.
+    # This is intentionally physics-only: it updates the architecture JSON
+    # so the UI can immediately show added blocks (e.g., "add cpu", "add sensor").
+    # ─────────────────────────────────────────────────────────────────────
+
+    def _detect_block_addition(self, instruction: str) -> tuple[str, int]:
+        """
+        Detect a requested block addition type + count from a short instruction.
+        We keep this heuristic intentionally simple to avoid overreaching.
+        """
+        lower = instruction.lower()
+
+        type_order = [
+            ("cpu", "cpu"),
+            ("memory", "memory"),
+            ("accelerator", "accelerator"),
+            ("dsp", "dsp"),
+            ("rf", "rf"),
+            ("io", "io"),
+            ("power", "power"),
+            # Common synonyms: "sensor" → analog front-end / sensor ADC
+            ("analog", "sensor"),
+            ("analog", "sensors"),
+        ]
+
+        add_type: str | None = None
+        for t, k in type_order:
+            if k in lower:
+                add_type = t
+                break
+
+        # Extract an optional explicit count: "add 3 cpu"
+        count_match = re.search(r"\b(\d{1,3})\s*(x|times)?\s*(cpu|sensor|sensors|memory|accelerator|dsp|rf|io|power)\b", lower)
+        count = int(count_match.group(1)) if count_match else 1
+        count = max(1, min(count, 8))  # safety cap
+
+        return (add_type or "analog"), count
+
+    def _make_next_block_id(self, blocks: list[dict]) -> str:
+        used = {b.get("id") for b in blocks}
+        i = len(blocks)
+        while True:
+            bid = f"blk_{i:02d}"
+            if bid not in used:
+                return bid
+            i += 1
+
+    def _apply_block_addition_to_architecture(self, arch: dict, instruction: str, pn) -> dict:
+        blocks: list[dict] = list(arch.get("blocks") or [])
+        add_type, count = self._detect_block_addition(instruction)
+
+        if count <= 0:
+            return arch
+
+        existing_count = len(blocks)
+        width = blocks[0].get("width", 12) if blocks else 12
+        height = blocks[0].get("height", 12) if blocks else 12
+
+        avg_power = sum(b.get("power_mw", 0) for b in blocks) / max(len(blocks), 1)
+        avg_area = sum(b.get("area_mm2", 0) for b in blocks) / max(len(blocks), 1)
+
+        scale_by_type: dict[str, float] = {
+            "cpu": 1.0,
+            "memory": 0.35,
+            "io": 0.25,
+            "power": 0.2,
+            "rf": 0.35,
+            "analog": 0.4,
+            "dsp": 0.45,
+            "accelerator": 1.25,
+        }
+        area_scale_by_type: dict[str, float] = {
+            "cpu": 1.0,
+            "memory": 0.55,
+            "io": 0.35,
+            "power": 0.4,
+            "rf": 0.5,
+            "analog": 0.6,
+            "dsp": 0.6,
+            "accelerator": 1.1,
+        }
+
+        type_to_default_name: dict[str, str] = {
+            "cpu": "Additional CPU",
+            "memory": "Additional SRAM",
+            "io": "I/O Expansion",
+            "power": "Power Management",
+            "rf": "RF Module",
+            "analog": "Sensor ADC",
+            "dsp": "DSP Module",
+            "accelerator": "Accelerator Module",
+        }
+
+        # If we already have a block of the requested type, clone its power/area.
+        candidates = [b for b in blocks if b.get("type") == add_type]
+        clone = None
+        if candidates:
+            clone = max(candidates, key=lambda b: (b.get("power_mw", 0), b.get("area_mm2", 0)))
+
+        cols = max(2, math.ceil(math.sqrt(existing_count + count)))
+
+        for idx in range(count):
+            new_block: dict = {}
+            bid = self._make_next_block_id(blocks)
+            i = len(blocks)
+            col = i % cols
+            row = i // cols
+            x = col * 15.0
+            y = row * 15.0
+
+            if clone:
+                new_power = max(float(clone.get("power_mw", avg_power)), 0.01) * (1.0 + idx * 0.02)
+                new_area = max(float(clone.get("area_mm2", avg_area)), 0.01) * (1.0 - idx * 0.01)
+                new_clock = clone.get("clock_mhz")
+                new_name = type_to_default_name[add_type] if idx > 0 else clone.get("name", type_to_default_name[add_type])
+                new_type = add_type
+            else:
+                new_power = max(avg_power * scale_by_type.get(add_type, 0.4), 0.01) * (1.0 + idx * 0.02)
+                new_area = max(avg_area * area_scale_by_type.get(add_type, 0.6), 0.01) * (1.0 - idx * 0.01)
+                new_clock = None
+                new_name = type_to_default_name[add_type]
+                new_type = add_type
+
+            new_block.update(
+                {
+                    "id": bid,
+                    "name": new_name,
+                    "type": new_type,
+                    "power_mw": round(new_power, 4),
+                    "area_mm2": round(new_area, 4),
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                    "connections": [],
+                    "clock_mhz": new_clock,
+                    "description": f"{new_name} block added via Co-Pilot instruction.",
+                }
+            )
+            blocks.append(new_block)
+
+        # Rebuild a simple sequential connection chain and a stable non-overlap layout.
+        # (Physics engine does not use the connections, but it keeps UI consistent.)
+        for i in range(len(blocks) - 1):
+            blocks[i]["connections"] = [blocks[i + 1]["id"]]
+        if blocks:
+            blocks[-1]["connections"] = []
+
+        # Update layout positions (in case widths/heights differed).
+        for i, b in enumerate(blocks):
+            col = i % cols
+            row = i // cols
+            b["x"] = col * 15.0
+            b["y"] = row * 15.0
+
+        arch = dict(arch or {})
+        arch["blocks"] = blocks
+        arch["process_node"] = pn.name
+        arch["total_power_mw"] = sum(b.get("power_mw", 0) for b in blocks)
+        arch["total_area_mm2"] = sum(b.get("area_mm2", 0) for b in blocks)
+
+        # Enrich: fill missing reference_component/cell_library/voltage_domain + clamp.
+        arch = self._validate_and_enrich_architecture(arch, pn)
+        return arch
+
+    async def apply_instruction_to_design(self, design: Design, instruction: str) -> DesignResponse:
+        pn_name = design.process_node or DEFAULT_PROCESS_NODE
+        pn = get_process_node(pn_name)
+
+        arch = design.architecture_json or {}
+        new_arch = self._apply_block_addition_to_architecture(arch, instruction, pn)
+
+        design.architecture_json = new_arch
+        # Refresh materials and constraint satisfaction to stay consistent.
+        materials = self._generate_materials(pn)
+        constraints_dict = dict(design.constraints_json or {})
+        constraints_dict["process_node"] = pn.name
+        if design.target_domain:
+            constraints_dict["application_domain"] = design.target_domain
+        satisfaction = self._compute_constraint_satisfaction(new_arch, constraints_dict, pn)
+
+        design.material_recommendations = materials
+        design.constraint_satisfaction = satisfaction
+
+        await self.db.commit()
+        await self.db.refresh(design)
+
+        return DesignResponse(
+            id=design.id,
+            nl_input=design.nl_input,
+            architecture=new_arch,
+            materials=materials,
+            constraint_satisfaction=satisfaction,
+            process_node=pn.name,
+            target_domain=design.target_domain,
+            status=design.status,
+            created_at=design.created_at,
+        )

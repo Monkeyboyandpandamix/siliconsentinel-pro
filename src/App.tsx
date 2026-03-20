@@ -46,7 +46,7 @@ const DOMAINS = ['IoT', 'Automotive', 'Consumer', 'Industrial', 'Wearable', 'AI/
 // ─── App-level STT (Web Speech API) for Step 1 textarea ──────────────────────
 function useDescriptionMic(onResult: (t: string) => void) {
   const [recording, setRecording] = useState(false);
-  const recRef = useRef<SpeechRecognition | null>(null);
+  const recRef = useRef<any>(null);
 
   const toggle = useCallback(() => {
     const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -58,14 +58,14 @@ function useDescriptionMic(onResult: (t: string) => void) {
       return;
     }
 
-    const r: SpeechRecognition = new SpeechRec();
+    const r: any = new SpeechRec();
     r.continuous = false;
     r.interimResults = false;
     r.lang = 'en-US';
     r.onstart = () => setRecording(true);
     r.onend = () => setRecording(false);
-    r.onresult = (e: SpeechRecognitionEvent) => {
-      const t = e.results[0]?.[0]?.transcript || '';
+    r.onresult = (e: any) => {
+      const t = e?.results?.[0]?.[0]?.transcript || '';
       if (t) onResult(t);
     };
     recRef.current = r;
@@ -199,87 +199,115 @@ export default function App() {
     const wantsSupply = currentStep >= 6 || !!supplyChain || /(supply chain|fab|foundry|supplier)/.test(lower);
     const wantsForecast = currentStep >= 7 || !!predictions || /(yield|forecast|mfg forecast|manufacturing)/.test(lower);
 
-    // If the user is requesting architectural changes, regenerate the entire design.
+    // If the user is requesting architectural changes, update the existing design
+    // in-place (so the new blocks show up on every page) and then rerun the pipeline
+    // modules we already have in state.
     if (wantsArch || !design) {
-      const combinedNlInput = design?.nl_input
-        ? `${design.nl_input}\n\nCo-Pilot modification request: ${instruction}`
-        : instruction;
-
-      const constraintData: Record<string, unknown> = {};
-      if (constraints.max_power_mw) constraintData.max_power_mw = parseFloat(constraints.max_power_mw);
-      if (constraints.max_area_mm2) constraintData.max_area_mm2 = parseFloat(constraints.max_area_mm2);
-      if (constraints.max_temp_c) constraintData.max_temp_c = parseFloat(constraints.max_temp_c);
-      if (constraints.budget_per_unit) constraintData.budget_per_unit = parseFloat(constraints.budget_per_unit);
-      if (constraints.target_volume) constraintData.target_volume = parseInt(constraints.target_volume, 10);
-      constraintData.process_node = processNode;
-      constraintData.application_domain = domain;
-
-      const budget_ceiling = constraints.budget_per_unit
-        ? parseFloat(constraints.budget_per_unit)
-        : undefined;
-
-      const newDesign = (await api.createDesign({
-        nl_input: combinedNlInput,
-        constraints: constraintData,
-        process_node: processNode,
-        target_domain: domain,
-        budget_ceiling,
-      })) as DesignResponse;
-
-      setDesign(newDesign);
-
-      let desiredStep = currentStep;
       const ran: string[] = [];
 
+      let activeDesign: DesignResponse;
+      if (!design) {
+        const combinedNlInput = instruction;
+
+        const constraintData: Record<string, unknown> = {};
+        if (constraints.max_power_mw) constraintData.max_power_mw = parseFloat(constraints.max_power_mw);
+        if (constraints.max_area_mm2) constraintData.max_area_mm2 = parseFloat(constraints.max_area_mm2);
+        if (constraints.max_temp_c) constraintData.max_temp_c = parseFloat(constraints.max_temp_c);
+        if (constraints.budget_per_unit) constraintData.budget_per_unit = parseFloat(constraints.budget_per_unit);
+        if (constraints.target_volume) constraintData.target_volume = parseInt(constraints.target_volume, 10);
+        constraintData.process_node = processNode;
+        constraintData.application_domain = domain;
+
+        const budget_ceiling = constraints.budget_per_unit ? parseFloat(constraints.budget_per_unit) : undefined;
+
+        activeDesign = (await api.createDesign({
+          nl_input: combinedNlInput,
+          constraints: constraintData,
+          process_node: processNode,
+          target_domain: domain,
+          budget_ceiling,
+        })) as DesignResponse;
+      } else {
+        activeDesign = (await api.applyInstruction(design.id, { instruction })) as DesignResponse;
+      }
+
+      setDesign(activeDesign);
+
+      // Re-run ONLY what matters for the current intent.
+      // The deterministic part for "add sensor" is architecture + simulation.
+      // We avoid forcing AI-dependent modules unless the user is already in/asking for them.
+
       if (wantsSimulation) {
-        const sim = (await api.runSimulation(newDesign.id, { ambient_temp_c: 25, workload_profile: 'typical' })) as SimulationResponse;
-        setSimulation(sim);
-        ran.push('Simulation');
-        desiredStep = Math.max(desiredStep, 3);
+        try {
+          const sim = (await api.runSimulation(activeDesign.id, { ambient_temp_c: 25, workload_profile: 'typical' })) as SimulationResponse;
+          setSimulation(sim);
+          ran.push('Simulation');
+        } catch {
+          // If simulation fails, still keep the architecture update visible.
+        }
       }
 
       if (wantsOptimization) {
-        const focus =
-          /(area|smaller|compact)/.test(lower) ? 'area' :
-          /(performance|faster|latency|clock)/.test(lower) ? 'performance' :
-          /(power|thermal|cool|hot|efficien)/.test(lower) ? 'power' :
-          'balanced';
+        try {
+          const focus =
+            /(area|smaller|compact)/.test(lower) ? 'area' :
+            /(performance|faster|latency|clock)/.test(lower) ? 'performance' :
+            /(power|thermal|cool|hot|efficien)/.test(lower) ? 'power' :
+            'balanced';
 
-        const opt = (await api.optimizeDesign(newDesign.id, { focus })) as OptimizationResponse;
-        setOptimization(opt);
-        // If the optimizer returned a new architecture, keep the UI consistent.
-        if (opt.optimized_architecture) {
-          setDesign((prev) =>
-            prev ? { ...prev, architecture: opt.optimized_architecture as ArchitectureBlueprint } : prev,
-          );
+          const opt = (await api.optimizeDesign(activeDesign.id, { focus })) as OptimizationResponse;
+          setOptimization(opt);
+          if (opt.optimized_architecture) {
+            setDesign((prev) =>
+              prev ? { ...prev, architecture: opt.optimized_architecture as ArchitectureBlueprint } : prev,
+            );
+          }
+          ran.push('Optimization');
+
+          // Keep thermal aligned with optimized blocks (best-effort).
+          try {
+            const simAfterOpt = (await api.runSimulation(activeDesign.id, { ambient_temp_c: 25, workload_profile: 'typical' })) as SimulationResponse;
+            setSimulation(simAfterOpt);
+            ran.push('Simulation');
+          } catch {
+            // no-op
+          }
+        } catch {
+          // If optimization fails, still keep architecture + whatever modules succeeded.
         }
-        ran.push('Optimization');
-        desiredStep = Math.max(desiredStep, 4);
       }
 
       if (wantsBom) {
-        const vol = parseInt(constraints.target_volume || '10000', 10);
-        const nextBom = (await api.generateBOM(newDesign.id, { volume: vol })) as BOMResponse;
-        setBom(nextBom);
-        ran.push('BOM');
-        desiredStep = Math.max(desiredStep, 5);
+        try {
+          const vol = parseInt(constraints.target_volume || '10000', 10);
+          const nextBom = (await api.generateBOM(activeDesign.id, { volume: vol })) as BOMResponse;
+          setBom(nextBom);
+          ran.push('BOM');
+        } catch {
+          // no-op
+        }
       }
 
       if (wantsSupply) {
-        const nextSupply = (await api.getSupplyChain(newDesign.id)) as SupplyChainResponse;
-        setSupplyChain(nextSupply);
-        ran.push('Supply Chain');
-        desiredStep = Math.max(desiredStep, 6);
+        try {
+          const nextSupply = (await api.getSupplyChain(activeDesign.id)) as SupplyChainResponse;
+          setSupplyChain(nextSupply);
+          ran.push('Supply Chain');
+        } catch {
+          // no-op
+        }
       }
 
       if (wantsForecast) {
-        const nextPredictions = (await api.getPredictions(newDesign.id)) as PredictionsResponse;
-        setPredictions(nextPredictions);
-        ran.push('Forecast');
-        desiredStep = Math.max(desiredStep, 7);
+        try {
+          const nextPredictions = (await api.getPredictions(activeDesign.id)) as PredictionsResponse;
+          setPredictions(nextPredictions);
+          ran.push('Forecast');
+        } catch {
+          // no-op
+        }
       }
 
-      setCurrentStep(desiredStep);
       return ran.length ? `Applied: ${ran.join(' + ')}` : 'Applied your requested changes.';
     }
 
@@ -287,7 +315,6 @@ export default function App() {
     if (!design) return 'No design available to apply changes.';
 
     const ran: string[] = [];
-    let desiredStep = currentStep;
 
     if (wantsOptimization) {
       const focus =
@@ -304,14 +331,12 @@ export default function App() {
         );
       }
       ran.push('Optimization');
-      desiredStep = Math.max(desiredStep, 4);
     }
 
     if (wantsSimulation) {
       const sim = (await api.runSimulation(design.id, { ambient_temp_c: 25, workload_profile: 'typical' })) as SimulationResponse;
       setSimulation(sim);
       ran.push('Simulation');
-      desiredStep = Math.max(desiredStep, 3);
     }
 
     if (wantsBom) {
@@ -319,24 +344,19 @@ export default function App() {
       const nextBom = (await api.generateBOM(design.id, { volume: vol })) as BOMResponse;
       setBom(nextBom);
       ran.push('BOM');
-      desiredStep = Math.max(desiredStep, 5);
     }
 
     if (wantsSupply) {
       const nextSupply = (await api.getSupplyChain(design.id)) as SupplyChainResponse;
       setSupplyChain(nextSupply);
       ran.push('Supply Chain');
-      desiredStep = Math.max(desiredStep, 6);
     }
 
     if (wantsForecast) {
       const nextPredictions = (await api.getPredictions(design.id)) as PredictionsResponse;
       setPredictions(nextPredictions);
       ran.push('Forecast');
-      desiredStep = Math.max(desiredStep, 7);
     }
-
-    setCurrentStep(desiredStep);
     return ran.length ? `Applied: ${ran.join(' + ')}` : 'Applied your requested changes.';
   }, [bom, constraints, currentStep, design, optimization, predictions, processNode, simulation, supplyChain, domain]);
 

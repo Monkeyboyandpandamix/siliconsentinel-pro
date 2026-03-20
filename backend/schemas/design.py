@@ -49,6 +49,10 @@ class DesignCreateRequest(BaseModel):
     budget_ceiling: Optional[float] = None
 
 
+class ApplyInstructionRequest(BaseModel):
+    instruction: str = Field(description="Instruction to apply to the existing architecture")
+
+
 class ConstraintSatisfaction(BaseModel):
     power: float = Field(ge=0, le=100, description="% satisfaction")
     area: float = Field(ge=0, le=100)

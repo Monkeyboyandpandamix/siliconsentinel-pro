@@ -25,6 +25,8 @@ export const api = {
   }) => request('/designs', { method: 'POST', body: JSON.stringify(data) }),
 
   getDesign: (id: number) => request(`/designs/${id}`),
+  applyInstruction: (designId: number, data: { instruction: string }) =>
+    request(`/designs/${designId}/apply-instruction`, { method: 'POST', body: JSON.stringify(data) }),
   listDesigns: () => request('/designs'),
 
   // Simulation (Module 2)

@@ -154,7 +154,7 @@ function useSpeechToText(onTranscript: (text: string) => void) {
   const [micError, setMicError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -174,7 +174,7 @@ function useSpeechToText(onTranscript: (text: string) => void) {
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (SpeechRecognition) {
-      const recognition: SpeechRecognition = new SpeechRecognition();
+      const recognition: any = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
       recognition.lang = 'en-US';
@@ -190,8 +190,8 @@ function useSpeechToText(onTranscript: (text: string) => void) {
           setMicError(`STT error: ${e.error}`);
         }
       };
-      recognition.onresult = (event) => {
-        const transcript = event.results[0]?.[0]?.transcript || '';
+      recognition.onresult = (event: any) => {
+        const transcript = event?.results?.[0]?.[0]?.transcript || '';
         if (transcript) onTranscript(transcript);
       };
 
@@ -305,12 +305,20 @@ export function ChatPanel({
       const wantsApply =
         !!onApplyInstruction &&
         /(add|change|modify|update|remove|replace)\b/i.test(text) &&
-        /(design|architecture|blocks|process|constraint|simulation|thermal|temperature|power|optimi|bom|supply|yield|forecast|stuff|\bit\b|\bthis\b|changes?)/i.test(text);
+        /(design|architecture|blocks|process|constraint|simulation|thermal|temperature|power|optimi|bom|supply|yield|forecast|hot|hotspot|cpu|memory|io|rf|analog|sensor|sensors|dsp|accelerator|stuff|\bit\b|\bthis\b|changes?)/i.test(text);
 
       if (wantsApply) {
-        const summary = await onApplyInstruction(text);
         setMessages((prev) => [
           ...prev,
+          {
+            role: 'assistant',
+            content: 'Applying requested changes across the relevant modules…',
+            source: 'ai_co_pilot_action',
+          },
+        ]);
+        const summary = await onApplyInstruction(text);
+        setMessages((prev) => [
+          ...prev.slice(0, -1),
           {
             role: 'assistant',
             content:
