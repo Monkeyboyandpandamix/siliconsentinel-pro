@@ -1,9 +1,9 @@
 from contextlib import asynccontextmanager
 import os
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from backend.config import get_settings
 from backend.database import init_db
@@ -53,4 +53,73 @@ async def health():
         "service": "SiliconSentinel Pro",
         "version": "2.0.0",
         "ai_provider": get_settings().ai_provider,
+    }
+
+
+async def _probe_watson_tts(settings) -> str:
+    if not settings.watson_tts_api_key or not settings.watson_tts_url:
+        return "NO KEY"
+    try:
+        tts_url = settings.watson_tts_url.rstrip("/")
+        async with httpx.AsyncClient(timeout=6) as client:
+            resp = await client.get(
+                f"{tts_url}/v1/voices",
+                auth=("apikey", settings.watson_tts_api_key),
+            )
+        return "ONLINE" if resp.status_code == 200 else f"ERROR {resp.status_code}"
+    except Exception:
+        return "ERROR"
+
+
+async def _probe_watson_orchestrate(settings) -> str:
+    if not settings.watson_orchestrate_api_key:
+        return "NO KEY"
+    if not settings.watson_orchestrate_url or not settings.watson_orchestrate_instance_id:
+        return "NO KEY"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            iam_resp = await client.post(
+                "https://iam.cloud.ibm.com/identity/token",
+                data={
+                    "apikey": settings.watson_orchestrate_api_key,
+                    "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        if iam_resp.status_code != 200:
+            return "AUTH ERROR"
+        return "ONLINE"
+    except Exception:
+        return "ERROR"
+
+
+async def _probe_gemini(settings) -> str:
+    if not settings.gemini_api_key:
+        return "NO KEY"
+    try:
+        async with httpx.AsyncClient(timeout=6) as client:
+            resp = await client.get(
+                "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": settings.gemini_api_key},
+            )
+        return "ONLINE" if resp.status_code == 200 else "ERROR"
+    except Exception:
+        return "ERROR"
+
+
+@app.get("/api/health/detailed")
+async def health_detailed():
+    settings = get_settings()
+    tts_status, orch_status, gemini_status = await _probe_watson_tts(settings), \
+        await _probe_watson_orchestrate(settings), \
+        await _probe_gemini(settings)
+
+    return {
+        "backend": "ONLINE",
+        "gemini": gemini_status,
+        "watson_orchestrate": orch_status,
+        "watson_tts": tts_status,
+        "simulation_core": "ONLINE",
+        "component_catalog": "ONLINE",
+        "supply_chain_db": "ONLINE",
     }

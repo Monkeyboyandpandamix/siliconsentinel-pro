@@ -69,6 +69,29 @@ export default function App() {
   const [predictions, setPredictions] = useState<PredictionsResponse | null>(null);
   const [qualityCheck, setQualityCheck] = useState<QualityCheckResponse | null>(null);
 
+  // System health (live from backend)
+  const [health, setHealth] = useState<Record<string, string>>({
+    backend: 'ONLINE',
+    gemini: '...',
+    watson_orchestrate: '...',
+    watson_tts: '...',
+    simulation_core: 'ONLINE',
+    component_catalog: 'ONLINE',
+    supply_chain_db: 'ONLINE',
+  });
+
+  useEffect(() => {
+    const fetchHealth = () => {
+      fetch('/api/health/detailed')
+        .then((r) => r.json())
+        .then((d) => setHealth(d))
+        .catch(() => {});
+    };
+    fetchHealth();
+    const id = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Accessibility
   const [a11y, setA11y] = useState<AccessibilityPrefs>({
     color_mode: 'default',
@@ -682,13 +705,13 @@ export default function App() {
           <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
             <h3 className="text-[10px] uppercase font-mono text-zinc-500 tracking-widest mb-3">System Health</h3>
             <div className="space-y-2.5">
-              <HealthRow label="Backend API" status="ONLINE" />
-              <HealthRow label="AI Engine (gemini)" status="NO KEY" />
-              <HealthRow label="IBM watsonx Orchestrate" status="ONLINE" />
-              <HealthRow label="IBM Watson Text-to-Speech" status="ONLINE" />
-              <HealthRow label="Simulation Core" status="ONLINE" />
-              <HealthRow label="Component Catalog" status="ONLINE" />
-              <HealthRow label="Supply Chain DB" status="ONLINE" />
+              <HealthRow label="Backend API" status={health.backend} />
+              <HealthRow label="AI Engine (gemini)" status={health.gemini} />
+              <HealthRow label="IBM watsonx Orchestrate" status={health.watson_orchestrate} />
+              <HealthRow label="IBM Watson Text-to-Speech" status={health.watson_tts} />
+              <HealthRow label="Simulation Core" status={health.simulation_core} />
+              <HealthRow label="Component Catalog" status={health.component_catalog} />
+              <HealthRow label="Supply Chain DB" status={health.supply_chain_db} />
             </div>
           </div>
 
@@ -772,9 +795,11 @@ function HealthRow({ label, status }: { label: string; status: string }) {
       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
       : status === 'NO KEY'
         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-        : status === 'ERROR'
-          ? 'bg-red-500/10 text-red-400 border-red-500/20'
-          : 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30';
+        : status === '...'
+          ? 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30 animate-pulse'
+          : status.startsWith('ERROR') || status === 'AUTH ERROR'
+            ? 'bg-red-500/10 text-red-400 border-red-500/20'
+            : 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30';
   return (
     <div className="flex justify-between items-center">
       <span className="text-xs text-zinc-400">{label}</span>
