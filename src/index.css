@@ -1,2 +1,43 @@
 @import "tailwindcss";
 @import "leaflet/dist/leaflet.css";
+
+/* ── Accessibility: Font Scaling ─────────────────────────────────────────────
+   Font size is applied to the <html> element via JS (document.documentElement),
+   so Tailwind's rem-based text-* classes all scale proportionally.
+   Nothing extra needed in CSS — the effect cascades automatically.
+──────────────────────────────────────────────────────────────────────────── */
+
+/* ── Accessibility: Color Mode Backgrounds ───────────────────────────────────
+   Applied to the root #app-root div via [data-color-mode="..."].
+   We set the actual background colour here so modes are visible even on
+   pure-black surfaces (CSS filter alone cannot tint black — it has no chroma).
+──────────────────────────────────────────────────────────────────────────── */
+
+/* Default: no override, keep Tailwind bg-black */
+[data-color-mode="default"]       { --cm-bg: #000000; --cm-bg2: #09090b; --cm-bg3: #18181b; }
+[data-color-mode="high_contrast"] { --cm-bg: #000000; --cm-bg2: #000000; --cm-bg3: #111111; }
+[data-color-mode="pattern_color"] { --cm-bg: #000000; --cm-bg2: #09090b; --cm-bg3: #18181b; }
+[data-color-mode="grayscale"]     { --cm-bg: #080808; --cm-bg2: #111111; --cm-bg3: #1e1e1e; }
+[data-color-mode="warm_amber"]    { --cm-bg: #1a0e00; --cm-bg2: #220f00; --cm-bg3: #301500; }
+[data-color-mode="cool_blue"]     { --cm-bg: #00080f; --cm-bg2: #000c18; --cm-bg3: #001224; }
+[data-color-mode="dark_sepia"]    { --cm-bg: #120a04; --cm-bg2: #180d06; --cm-bg3: #231208; }
+[data-color-mode="neon"]          { --cm-bg: #060010; --cm-bg2: #0d0018; --cm-bg3: #130022; }
+[data-color-mode="night"]         { --cm-bg: #020209; --cm-bg2: #040410; --cm-bg3: #060616; }
+[data-color-mode="deuteranopia"]  { --cm-bg: #000000; --cm-bg2: #09090b; --cm-bg3: #18181b; }
+[data-color-mode="tritanopia"]    { --cm-bg: #000000; --cm-bg2: #09090b; --cm-bg3: #18181b; }
+
+/* Apply variables to the root container and all bg-black / bg-zinc-950 / bg-zinc-900 surfaces */
+[data-color-mode] {
+  background-color: var(--cm-bg) !important;
+}
+[data-color-mode] .bg-black,
+[data-color-mode] .min-h-screen {
+  background-color: var(--cm-bg) !important;
+}
+[data-color-mode] .bg-zinc-950,
+[data-color-mode] .bg-zinc-950\/80 {
+  background-color: var(--cm-bg2) !important;
+}
+[data-color-mode] .bg-zinc-900 {
+  background-color: var(--cm-bg3) !important;
+}

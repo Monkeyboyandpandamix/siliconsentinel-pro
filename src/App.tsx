@@ -151,6 +151,12 @@ export default function App() {
     api.updateAccessibilityPrefs('default', a11y).catch(() => {});
   }, [a11y]);
 
+  // Apply font scaling to the HTML root so Tailwind's rem-based text classes scale correctly
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${fontScale * 100}%`;
+    return () => { document.documentElement.style.fontSize = ''; };
+  }, [fontScale]);
+
   const handleError = useCallback((e: unknown) => {
     const msg = e instanceof Error ? e.message : 'An unexpected error occurred';
     setError(msg);
@@ -320,8 +326,9 @@ export default function App() {
 
   return (
     <div
+      data-color-mode={a11y.color_mode}
       className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-300"
-      style={{ fontSize: `${fontScale * 100}%`, filter: filterStyle || undefined }}
+      style={{ filter: filterStyle || undefined }}
     >
       {/* Accessibility Toolbar */}
       <AccessibilityToolbar prefs={a11y} onChange={setA11y} />
