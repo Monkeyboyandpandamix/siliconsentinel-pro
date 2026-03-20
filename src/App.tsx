@@ -26,6 +26,8 @@ import { ManufacturabilityScore } from './components/ManufacturabilityScore';
 import { SupplierCards } from './components/SupplierCards';
 import { ConstraintForm } from './components/ConstraintForm';
 import { SimulationResults } from './components/SimulationResults';
+import { ChatPanel } from './components/ChatPanel';
+import { TextSelectionReader } from './components/TextSelectionReader';
 
 const STEPS = [
   { id: 1, title: 'Describe', icon: Wand2, description: 'Describe Your Chip' },
@@ -661,14 +663,29 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        {/* Right: Status Panel */}
-        <div className="lg:col-span-3 space-y-4">
+        {/* Right: Chat + Status Panel */}
+        <div className="lg:col-span-3 flex flex-col gap-4">
+          {/* AI Chat — takes available height */}
+          <div className="flex-1 min-h-[360px]">
+            <ChatPanel
+              design={design}
+              simulation={simulation}
+              optimization={optimization}
+              bom={bom}
+              supplyChain={supplyChain}
+              predictions={predictions}
+            />
+          </div>
+
           {design && <OrchestrationStatus designId={design.id} currentStep={currentStep} />}
 
           <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
             <h3 className="text-[10px] uppercase font-mono text-zinc-500 tracking-widest mb-3">System Health</h3>
             <div className="space-y-2.5">
-              <HealthRow label="AI Engine (Gemini)" status="ONLINE" />
+              <HealthRow label="Backend API" status="ONLINE" />
+              <HealthRow label="AI Engine (gemini)" status="NO KEY" />
+              <HealthRow label="IBM watsonx Orchestrate" status="ONLINE" />
+              <HealthRow label="IBM Watson Text-to-Speech" status="ONLINE" />
               <HealthRow label="Simulation Core" status="ONLINE" />
               <HealthRow label="Component Catalog" status="ONLINE" />
               <HealthRow label="Supply Chain DB" status="ONLINE" />
@@ -698,6 +715,9 @@ export default function App() {
           </p>
         </div>
       </footer>
+
+      {/* Text-selection read aloud bubble — global */}
+      <TextSelectionReader prefs={a11y} />
     </div>
   );
 }
@@ -747,10 +767,18 @@ function RiskBadge({ level }: { level: string }) {
 }
 
 function HealthRow({ label, status }: { label: string; status: string }) {
+  const cls =
+    status === 'ONLINE'
+      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+      : status === 'NO KEY'
+        ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+        : status === 'ERROR'
+          ? 'bg-red-500/10 text-red-400 border-red-500/20'
+          : 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30';
   return (
     <div className="flex justify-between items-center">
       <span className="text-xs text-zinc-400">{label}</span>
-      <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20">{status}</span>
+      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${cls}`}>{status}</span>
     </div>
   );
 }

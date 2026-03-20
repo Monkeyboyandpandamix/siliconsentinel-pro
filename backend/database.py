@@ -4,7 +4,7 @@ from sqlalchemy.orm import DeclarativeBase
 from backend.config import get_settings
 
 engine = create_async_engine(
-    get_settings().database_url,
+    get_settings().silicon_db_url,
     echo=False,
     connect_args={"check_same_thread": False},
 )
