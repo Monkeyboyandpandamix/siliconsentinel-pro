@@ -330,6 +330,7 @@ export interface CarbonFootprint {
   total_co2e_kg: number;
   co2e_per_chip_kg: number;
   co2e_per_wafer_kg: number;
+  total_energy_kwh: number;
   breakdown: {
     fabrication_kg: number;
     process_gases_kg: number;
@@ -338,9 +339,23 @@ export interface CarbonFootprint {
     shipping_kg: number;
   };
   fab_country: string;
+  carbon_intensity_kwh: number;
   carbon_intensity_label: string;
+  carbon_intensity_live: boolean;
+  renewable_pct: number | null;
   wafers_needed: number;
   volume: number;
+  energy_per_wafer_kwh: number;
+  equivalents: {
+    trees_absorb_1yr: number;
+    car_miles_driven: number;
+    smartphone_charges: number;
+    home_electricity_days: number;
+    bulb_60w_hours: number;
+    led_9w_hours: number;
+    flights_nyc_london: number;
+    coal_burned_kg: number;
+  };
 }
 
 // Manufacturability

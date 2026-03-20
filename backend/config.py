@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     watson_orchestrate_url: str = ""
     watson_orchestrate_instance_id: str = ""
     watson_orchestrate_agent_id: str = ""
+    watson_stt_api_key: str = ""
+    watson_stt_url: str = ""
+    electricity_maps_api_key: str = ""
     upload_dir: str = "uploads"
     cors_origins: list[str] = ["*"]
 

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.database import get_db
+from backend.config import get_settings
 from backend.models.design import Design
 from backend.models.simulation import Simulation
 from backend.models.bom import BOMEntry
@@ -38,13 +39,15 @@ async def estimate_carbon(design_id: int, req: CarbonRequest, db: AsyncSession =
     node = arch.get("process_node", design.process_node or "28nm")
     area = arch.get("total_area_mm2", 1.0)
 
-    carbon = estimate_carbon_footprint(
+    settings = get_settings()
+    carbon = await estimate_carbon_footprint(
         process_node_name=node,
         die_area_mm2=area,
         volume=req.volume,
         fab_country=req.fab_country,
         assembly_country=req.assembly_country,
         shipping_distance_km=req.shipping_distance_km,
+        electricity_maps_api_key=settings.electricity_maps_api_key or None,
     )
     return carbon
 

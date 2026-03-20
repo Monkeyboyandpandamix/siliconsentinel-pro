@@ -86,6 +86,26 @@ If Watson Orchestrate is unavailable (wrong URL format, network error, etc.), it
 Process-node benchmark comparisons are built in for: 5nm, 7nm, 14nm, 28nm, 65nm, 180nm.
 Metrics compared: power density (mW/mm²), max clock (MHz), static leakage %, junction temperature.
 
+## Carbon Footprint Estimator (Extended)
+
+Endpoint: `POST /api/designs/{id}/carbon`
+
+**Live data sources (no API key required):**
+- **World Bank Open Data API** — fetches real renewable energy % for fab country (`EG.ELC.RNEW.ZS` indicator). Supported: USA, Germany, South Korea, Japan, China, Ireland, Netherlands, India, France, Israel
+- **IEA/IRENA 2022 fallback** — for countries not in World Bank (Taiwan, Singapore) or API unavailable
+
+**Optional live grid carbon intensity:**
+- **Electricity Maps API** — if `ELECTRICITY_MAPS_API_KEY` secret is set, fetches real-time gCO2/kWh per fab grid zone. Falls back to IEA hardcoded values otherwise.
+
+**EPA Greenhouse Gas Equivalencies (2024) — real-world translations shown in UI:**
+- Trees needed to absorb CO2 in 1 year (60 kg CO2/tree/year)
+- 60W bulb hours + 9W LED equivalent
+- Car miles driven (404 g CO2/mile, US EPA)
+- Smartphone charges (11.4 Wh/charge)
+- Days of US home electricity (28.9 kWh/day, EIA 2022)
+- NYC→London flights (585 kg CO2/passenger, ICAO 2023)
+- Coal burned (kg)
+
 ## Physics Fallback (ai_provider.py)
 
 `PhysicsProvider` generates realistic chip architectures without Gemini API key, using 7 domain templates (IoT, Mobile, Automotive, AI/ML, RF, Server, General). All 8 pipeline steps work without any external API keys.
