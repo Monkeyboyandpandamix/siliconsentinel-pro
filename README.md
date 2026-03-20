@@ -1160,6 +1160,7 @@ npm run build
 | GET | `/api/orchestration/{id}/status` | — | Pipeline stage status for design |
 | GET | `/api/orchestration/{id}/orders` | — | List all orchestration orders for design |
 | POST | `/api/orchestration/chat` | `{message, context, history}` | Watson Orchestrate / Gemini chat |
+| POST | `/api/designs/{id}/apply-instruction` | `{instruction}` | Apply a deterministic architectural update to an existing design (e.g., add CPU/sensor) |
 | POST | `/api/orchestration/tts` | `{text}` | Watson Neural TTS synthesis |
 | POST | `/api/orchestration/transcribe` | `multipart/form-data` audio | Watson STT transcription |
 
