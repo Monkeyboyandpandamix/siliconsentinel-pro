@@ -190,10 +190,23 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
     # The assistant_id is the agent_id for Watson Orchestrate
     assistant_id = agent_id if agent_id else "default"
 
-    # Try multiple URL patterns for Watson Orchestrate
+    # Try multiple URL patterns for Watson Orchestrate / Watson Assistant v2
+    # The Watson Assistant v2 API standard URL is api.{region}.assistant.watson.cloud.ibm.com
+    # Watson Orchestrate may expose the same API under its own domain
+    region = "us-south"
+    if "us-east" in orch_url:
+        region = "us-east"
+    elif "eu-de" in orch_url:
+        region = "eu-de"
+    elif "eu-gb" in orch_url:
+        region = "eu-gb"
+    elif "au-syd" in orch_url:
+        region = "au-syd"
+
     base_candidates = [
-        f"{orch_url}/instances/{instance_id}",  # with instance prefix
-        orch_url,                                 # without instance prefix (some deployments)
+        f"https://api.{region}.assistant.watson.cloud.ibm.com/instances/{instance_id}",
+        f"{orch_url}/instances/{instance_id}",
+        orch_url,
     ]
 
     session_id: str | None = None
@@ -213,13 +226,13 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
                         logger.info(f"WxO session created at {sess_path}")
                         break
                     else:
-                        logger.warning(f"WxO session path {sess_path}: HTTP 200 but no session_id in JSON response")
+                        logger.warning(f"WxO session path {sess_path}: HTTP 200 but no session_id — body: {sess_resp.text[:200]}")
                 else:
-                    logger.debug(f"WxO session path {sess_path}: HTTP {sess_resp.status_code}")
+                    logger.warning(f"WxO session path {sess_path}: HTTP {sess_resp.status_code} — {sess_resp.text[:200]}")
             except ValueError as e:
-                logger.debug(f"WxO session path {sess_path}: JSON parse error — {e}")
+                logger.warning(f"WxO session path {sess_path}: JSON parse error — {e}")
             except Exception as e:
-                logger.debug(f"WxO session path {sess_path}: {e}")
+                logger.warning(f"WxO session path {sess_path}: {e}")
                 continue
 
         if not session_id or not working_base:
