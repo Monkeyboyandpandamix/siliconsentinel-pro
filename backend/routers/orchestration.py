@@ -427,7 +427,7 @@ def _smart_fallback_response(message: str, ctx: dict[str, Any]) -> str:
     # General / no context
     if not ctx:
         return (
-            "I'm your SiliconSentinel AI Co-Pilot, powered by IBM watsonx Orchestrate. "
+            "I'm your SiliconSentinel AI Co-Pilot. "
             "Generate a chip architecture first, then ask me about:\n"
             "• Power consumption and efficiency\n"
             "• Thermal hotspots and cooling\n"
@@ -446,6 +446,12 @@ def _smart_fallback_response(message: str, ctx: dict[str, Any]) -> str:
 @router.post("/chat", response_model=ChatResponse)
 async def orchestrate_chat(req: ChatRequest):
     settings = get_settings()
+
+    # Guard against very large inputs to reduce prompt injection surface
+    if len(req.message) > 2000:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Message too long — maximum 2000 characters.")
+
     context_prefix = build_context_prefix(req.context)
 
     try:

@@ -312,10 +312,16 @@ class GeminiProvider(AIProvider):
         from google import genai
         settings = get_settings()
         self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.model = "gemini-3.1-pro-preview"
+        # Use a stable, production-available model name.
+        # gemini-2.0-flash is fast and broadly available; bump to 2.5-pro when stable.
+        self.model = "gemini-2.0-flash"
 
     async def _call(self, prompt: str) -> str:
-        response = self.client.models.generate_content(
+        import asyncio
+        # generate_content is synchronous — run in a thread pool to avoid
+        # blocking FastAPI's async event loop.
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
             model=self.model,
             contents=prompt,
         )
@@ -374,32 +380,39 @@ class GeminiProvider(AIProvider):
 
 
 class WatsonxProvider(AIProvider):
-    """Stub for IBM watsonx.ai integration. Implements the same interface
-    so the system can switch providers via config."""
+    """
+    Placeholder for IBM watsonx.ai foundation model integration.
+
+    This provider is NOT yet implemented — all calls delegate to PhysicsProvider.
+    Set AI_PROVIDER=gemini (with GEMINI_API_KEY) for LLM-backed generation.
+    This class exists as an integration point for future watsonx.ai LLM wiring.
+    """
 
     def __init__(self):
-        settings = get_settings()
-        self.api_key = settings.watsonx_api_key
-        self.project_id = settings.watsonx_project_id
-        self.url = settings.watsonx_url
+        import logging
+        logging.getLogger(__name__).warning(
+            "WatsonxProvider selected but not yet implemented — delegating to PhysicsProvider. "
+            "Set AI_PROVIDER=gemini with GEMINI_API_KEY for LLM-backed generation."
+        )
+        self._fallback = PhysicsProvider()
 
     async def generate_architecture(self, prompt: str, constraints: dict) -> dict:
-        raise NotImplementedError("watsonx provider not yet implemented — set AI_PROVIDER=gemini")
+        return await self._fallback.generate_architecture(prompt, constraints)
 
     async def analyze_simulation(self, design: dict, sim_results: dict) -> dict:
-        raise NotImplementedError("watsonx provider not yet implemented")
+        return await self._fallback.analyze_simulation(design, sim_results)
 
     async def generate_bom(self, architecture: dict, domain: str) -> list[dict]:
-        raise NotImplementedError("watsonx provider not yet implemented")
+        return await self._fallback.generate_bom(architecture, domain)
 
     async def analyze_defects(self, image_description: str, design_context: dict) -> dict:
-        raise NotImplementedError("watsonx provider not yet implemented")
+        return await self._fallback.analyze_defects(image_description, design_context)
 
     async def optimize_design(self, architecture: dict, sim_results: dict, focus: str) -> dict:
-        raise NotImplementedError("watsonx provider not yet implemented")
+        return await self._fallback.optimize_design(architecture, sim_results, focus)
 
     async def generate_supply_chain_analysis(self, architecture: dict, bom: list[dict]) -> dict:
-        raise NotImplementedError("watsonx provider not yet implemented")
+        return await self._fallback.generate_supply_chain_analysis(architecture, bom)
 
 
 _provider_instance: Optional[AIProvider] = None

@@ -249,7 +249,16 @@ class DesignCopilotService:
         else:
             scores["area"] = 80.0
 
-        scores["performance"] = 75.0
+        # Performance: estimate from highest block clock vs node max
+        block_clocks = [b.get("clock_mhz", 0) for b in arch.get("blocks", []) if b.get("clock_mhz")]
+        max_block_clock = max(block_clocks) if block_clocks else 0
+        node_max_clock = getattr(pn, "max_clock_mhz", None)
+        if node_max_clock and node_max_clock > 0 and max_block_clock > 0:
+            clock_ratio = max_block_clock / node_max_clock
+            scores["performance"] = round(max(0, min(100, clock_ratio * 100)), 1)
+        else:
+            scores["performance"] = 75.0
+
         scores["thermal"] = 80.0 if total_power < 5000 else 60.0
         scores["cost"] = 70.0
 

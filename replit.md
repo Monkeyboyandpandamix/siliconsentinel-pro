@@ -109,3 +109,25 @@ Endpoint: `POST /api/designs/{id}/carbon`
 ## Physics Fallback (ai_provider.py)
 
 `PhysicsProvider` generates realistic chip architectures without Gemini API key, using 7 domain templates (IoT, Mobile, Automotive, AI/ML, RF, Server, General). All 8 pipeline steps work without any external API keys.
+
+## Security & Quality Fixes Applied
+
+| Issue | Fix |
+|-------|-----|
+| Gemini model `"gemini-3.1-pro-preview"` (nonexistent) | Changed to `"gemini-2.0-flash"` |
+| `GeminiProvider._call` sync-blocking async event loop | Wrapped with `asyncio.to_thread()` |
+| `CORS: allow_origins=["*"] + allow_credentials=True` invalid | Set `allow_credentials=False` |
+| File upload in `/quality-check` had no size/type limit | Added 10 MB cap + MIME type allowlist |
+| Chat fallback intro claimed "watsonx Orchestrate" | Corrected to "SiliconSentinel AI Co-Pilot" |
+| `WatsonxProvider` raised `NotImplementedError` on all calls | Now delegates to `PhysicsProvider` with warning |
+| `performance` score hardcoded 75.0 in constraint satisfaction | Now derived from block clock_mhz vs node |
+| Chat endpoint had no input length limit | Added 2000-char cap |
+
+## Honest Capability Description
+
+- **Simulation**: Physics-based parameterized estimator (real math: Fourier thermal, CMOS power equations, Murphy yield). Not an EDA digital twin.
+- **Yield prediction**: Murphy's model — industry-standard formula, correctly implemented.
+- **Carbon estimator**: Calls live World Bank Open Data API; EPA equivalencies sourced from 2024 calculator.
+- **BOM**: Real part numbers and pricing from DigiKey/Mouser 2024/2025 catalog.
+- **Foundry data**: Real NRE costs, DRC rule counts, packaging options — sourced from public disclosures.
+- **AI quality control**: Image metadata only (size/name) passed to AI — not actual vision analysis. Gemini multimodal upgrade pending.
