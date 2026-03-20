@@ -266,10 +266,25 @@ export default function App() {
 
   const arch = design?.architecture;
 
+  const colorModeFilter: Record<string, string> = {
+    default:      '',
+    high_contrast:'contrast(1.5)',
+    pattern_color:'',
+    grayscale:    'grayscale(1)',
+    warm_amber:   'sepia(0.6) brightness(1.05)',
+    cool_blue:    'hue-rotate(200deg) saturate(0.8)',
+    dark_sepia:   'sepia(0.8) contrast(1.15) brightness(0.9)',
+    neon:         'saturate(2) contrast(1.15)',
+    night:        'brightness(0.6) saturate(0.5)',
+    deuteranopia: 'hue-rotate(45deg) saturate(1.4)',
+    tritanopia:   'hue-rotate(330deg) saturate(1.3)',
+  };
+  const filterStyle = colorModeFilter[a11y.color_mode] ?? '';
+
   return (
     <div
-      className={`min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-300 ${a11y.color_mode === 'high_contrast' ? 'contrast-150' : ''} ${a11y.color_mode === 'grayscale' ? 'grayscale' : ''}`}
-      style={{ fontSize: `${fontScale * 100}%` }}
+      className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-300"
+      style={{ fontSize: `${fontScale * 100}%`, filter: filterStyle || undefined }}
     >
       {/* Accessibility Toolbar */}
       <AccessibilityToolbar prefs={a11y} onChange={setA11y} />

@@ -132,6 +132,18 @@ function buildContext(
   return ctx;
 }
 
+const QUICK_QUESTIONS_NO_DESIGN = [
+  'What can you help me with?',
+  'How does the chip design workflow work?',
+  'What process nodes are supported?',
+];
+
+const QUICK_QUESTIONS_WITH_DESIGN = [
+  'What are the thermal hotspots?',
+  'How can I reduce power?',
+  'Explain the yield prediction',
+];
+
 export function ChatPanel({
   design, simulation, optimization, bom, supplyChain, predictions,
 }: ChatPanelProps) {
@@ -146,6 +158,7 @@ export function ChatPanel({
   }, [messages]);
 
   const hasDesign = !!design?.architecture;
+  const quickQuestions = hasDesign ? QUICK_QUESTIONS_WITH_DESIGN : QUICK_QUESTIONS_NO_DESIGN;
 
   const sendMessage = async () => {
     const text = input.trim();
@@ -206,7 +219,7 @@ export function ChatPanel({
           <p className="text-xs font-semibold text-zinc-200 truncate">AI Design Co-Pilot</p>
           <p className="text-[10px] text-zinc-500 truncate">IBM watsonx Orchestrate</p>
         </div>
-        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${hasDesign ? 'bg-emerald-400' : 'bg-zinc-600'}`} />
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${hasDesign ? 'bg-emerald-400' : 'bg-amber-400/60'}`} />
       </div>
 
       {/* Messages */}
@@ -216,31 +229,25 @@ export function ChatPanel({
             <MessageSquare size={28} className="text-zinc-700" />
             <div>
               <p className="text-xs font-medium text-zinc-400">
-                {hasDesign
-                  ? 'Ask about your chip design'
-                  : 'Generate a design to start chatting'}
+                {hasDesign ? 'Ask about your chip design' : 'Ask me anything about chip design'}
               </p>
               <p className="text-[10px] text-zinc-600 mt-1">
-                Full chip context sent automatically with every message
+                {hasDesign
+                  ? 'Full chip context sent automatically with every message'
+                  : 'Generate an architecture to unlock full design analysis'}
               </p>
             </div>
-            {hasDesign && (
-              <div className="flex flex-wrap gap-1.5 justify-center mt-1">
-                {[
-                  'What are the thermal hotspots?',
-                  'How can I reduce power?',
-                  'Explain the yield prediction',
-                ].map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => { setInput(q); inputRef.current?.focus(); }}
-                    className="text-[10px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors border border-zinc-700/50"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            )}
+            <div className="flex flex-wrap gap-1.5 justify-center mt-1">
+              {quickQuestions.map((q) => (
+                <button
+                  key={q}
+                  onClick={() => { setInput(q); inputRef.current?.focus(); }}
+                  className="text-[10px] px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors border border-zinc-700/50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -291,7 +298,7 @@ export function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
+      {/* Input — always enabled */}
       <div className="p-3 border-t border-zinc-800 bg-zinc-900/40">
         <div className="flex gap-2 items-end">
           <textarea
@@ -299,15 +306,15 @@ export function ChatPanel({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={hasDesign ? 'Ask about your chip design...' : 'Generate a design first...'}
-            disabled={!hasDesign || loading}
+            placeholder={hasDesign ? 'Ask about your chip design…' : 'Ask about chip design, processes, trade-offs…'}
+            disabled={loading}
             rows={1}
             className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ maxHeight: '80px', overflowY: 'auto' }}
           />
           <button
             onClick={sendMessage}
-            disabled={!input.trim() || !hasDesign || loading}
+            disabled={!input.trim() || loading}
             className="w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors flex-shrink-0"
             aria-label="Send message"
           >
@@ -315,7 +322,7 @@ export function ChatPanel({
           </button>
         </div>
         <p className="text-[9px] text-zinc-600 mt-1.5 text-center">
-          Full chip context sent automatically with every message
+          {hasDesign ? 'Full chip context sent automatically' : 'Generate a design to unlock full context analysis'}
         </p>
       </div>
     </div>

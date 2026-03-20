@@ -8,7 +8,7 @@
       window.wxOConfiguration = {
         orchestrationID: "f459230554db416db8c23a3534ec4e8b_c8a9d776-460e-4c9a-b55f-0a2556febf8e",
         hostURL: "https://us-south.watson-orchestrate.cloud.ibm.com",
-        rootElementID: "root",
+        rootElementID: "wxo-chat-root",
         deploymentPlatform: "ibmcloud",
         crn: "crn:v1:bluemix:public:watsonx-orchestrate:us-south:a/f459230554db416db8c23a3534ec4e8b:c8a9d776-460e-4c9a-b55f-0a2556febf8e::",
         chatOptions: {
@@ -16,10 +16,10 @@
         }
       };
       setTimeout(function () {
-        const script = document.createElement('script');
-        script.src = `${window.wxOConfiguration.hostURL}/wxochat/wxoLoader.js?embed=true`;
+        var script = document.createElement('script');
+        script.src = window.wxOConfiguration.hostURL + '/wxochat/wxoLoader.js?embed=true';
         script.addEventListener('load', function () {
-          wxoLoader.init();
+          if (typeof wxoLoader !== 'undefined') wxoLoader.init();
         });
         document.head.appendChild(script);
       }, 0);
@@ -27,6 +27,7 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="wxo-chat-root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
