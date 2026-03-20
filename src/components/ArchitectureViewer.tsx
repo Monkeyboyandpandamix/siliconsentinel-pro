@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import type { ArchitectureBlueprint, BlockSpec } from '../types';
+import { PhysicalLayoutViewer } from './PhysicalLayoutViewer';
 
 interface Props {
   architecture: ArchitectureBlueprint;
@@ -107,6 +108,7 @@ function wirePathBetween(a: LayoutBlock, b: LayoutBlock): string {
 
 export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const [viewMode, setViewMode] = useState<'blueprint' | 'physical'>('blueprint');
   const [showWiring, setShowWiring] = useState(true);
   const [selectedBlock, setSelectedBlock] = useState<LayoutBlock | null>(null);
   const layoutRef = useRef<LayoutBlock[]>([]);
@@ -506,30 +508,69 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
 
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden">
-      {/* Toolbar */}
-      <div className="flex justify-between items-center px-4 py-3 border-b border-zinc-800/60 bg-zinc-900/80">
-        <div>
-          <h3 className="text-zinc-100 font-bold text-sm tracking-wide">Architecture Blueprint</h3>
-          <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest mt-0.5">
-            Drag blocks · Scroll to zoom · Hover to trace connections
-          </p>
-        </div>
-        <div className="flex gap-2 items-center flex-wrap">
-          <button
-            onClick={() => setShowWiring(v => !v)}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${showWiring ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'bg-zinc-800 border-zinc-700 text-zinc-500'}`}
-          >
-            {showWiring ? '⟵ Wiring ON' : '⟵ Wiring OFF'}
-          </button>
-          <button onClick={fitToView} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
-            Fit
-          </button>
-          <button onClick={resetZoom} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
-            Reset
-          </button>
-        </div>
+      {/* View mode tab bar */}
+      <div className="flex items-stretch border-b border-zinc-800 bg-zinc-900/90">
+        <button
+          onClick={() => setViewMode('blueprint')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold border-b-2 transition-all ${
+            viewMode === 'blueprint'
+              ? 'border-indigo-500 text-indigo-300 bg-indigo-500/10'
+              : 'border-transparent text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="1" y="1" width="5" height="4" rx="1" fill="currentColor" fillOpacity="0.7"/>
+            <rect x="8" y="1" width="5" height="4" rx="1" fill="currentColor" fillOpacity="0.7"/>
+            <rect x="1" y="7" width="5" height="6" rx="1" fill="currentColor" fillOpacity="0.7"/>
+            <rect x="8" y="7" width="5" height="6" rx="1" fill="currentColor" fillOpacity="0.7"/>
+          </svg>
+          Blueprint
+        </button>
+        <button
+          onClick={() => setViewMode('physical')}
+          className={`flex items-center gap-2 px-5 py-3 text-xs font-bold border-b-2 transition-all ${
+            viewMode === 'physical'
+              ? 'border-cyan-400 text-cyan-300 bg-cyan-500/10'
+              : 'border-transparent text-zinc-500 hover:text-zinc-300'
+          }`}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="0.5" y="0.5" width="13" height="13" rx="1" stroke="currentColor" strokeOpacity="0.6"/>
+            <rect x="2" y="2" width="10" height="10" rx="0.5" fill="currentColor" fillOpacity="0.08"/>
+            <line x1="3" y1="4" x2="11" y2="4" stroke="#ff3a3a" strokeWidth="0.8"/>
+            <line x1="7" y1="2" x2="7" y2="12" stroke="#3dff4a" strokeWidth="0.8"/>
+            <line x1="3" y1="9" x2="11" y2="9" stroke="#ffe040" strokeWidth="0.8"/>
+          </svg>
+          Physical Layout
+          <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/30 text-cyan-400 font-mono">PIN→PIN</span>
+        </button>
+
+        {/* Blueprint controls (only show in blueprint mode) */}
+        {viewMode === 'blueprint' && (
+          <div className="flex gap-2 items-center ml-auto px-3">
+            <button
+              onClick={() => setShowWiring(v => !v)}
+              className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${showWiring ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'bg-zinc-800 border-zinc-700 text-zinc-500'}`}
+            >
+              {showWiring ? '⟵ Wiring ON' : '⟵ Wiring OFF'}
+            </button>
+            <button onClick={fitToView} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
+              Fit
+            </button>
+            <button onClick={resetZoom} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
+              Reset
+            </button>
+          </div>
+        )}
       </div>
 
+      {/* Physical Layout mode */}
+      {viewMode === 'physical' && (
+        <PhysicalLayoutViewer architecture={architecture} />
+      )}
+
+      {/* Blueprint mode */}
+      {viewMode === 'blueprint' && (<>
       {/* Legend */}
       <div className="flex gap-3 px-4 py-2 border-b border-zinc-800/40 bg-zinc-950/40 flex-wrap">
         {blockTypes.map(t => (
@@ -587,6 +628,7 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
           </div>
         </div>
       )}
+      </>)}
     </div>
   );
 };
