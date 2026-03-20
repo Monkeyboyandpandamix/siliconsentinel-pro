@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 import json
 import logging
+import base64
 
 from backend.database import get_db
 from backend.config import get_settings
@@ -454,3 +455,80 @@ async def orchestrate_chat(req: ChatRequest):
         logger.warning(f"Watson Orchestrate unavailable, using fallback: {e}")
         reply = _smart_fallback_response(req.message, req.context)
         return ChatResponse(reply=reply, source="ai_co_pilot")
+
+
+# ─── Watson STT transcription ─────────────────────────────────────────────────
+
+class TranscribeResponse(BaseModel):
+    transcript: str
+    confidence: float
+    source: str
+
+
+@router.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """
+    Transcribe audio using IBM Watson Speech-to-Text.
+    Accepts WebM/Opus (browser MediaRecorder default) or WAV.
+    Falls back gracefully if Watson STT is not configured.
+    """
+    settings = get_settings()
+    api_key = settings.watson_stt_api_key
+    stt_url = settings.watson_stt_url.rstrip("/") if settings.watson_stt_url else ""
+
+    audio_bytes = await audio.read()
+
+    if api_key and stt_url:
+        try:
+            content_type = audio.content_type or "audio/webm"
+            if "webm" in content_type or "ogg" in content_type:
+                watson_content_type = "audio/webm;codecs=opus"
+            elif "wav" in content_type:
+                watson_content_type = "audio/wav"
+            elif "mp4" in content_type or "mp3" in content_type:
+                watson_content_type = "audio/mp3"
+            else:
+                watson_content_type = "audio/webm;codecs=opus"
+
+            credentials = base64.b64encode(f"apikey:{api_key}".encode()).decode()
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{stt_url}/v1/recognize",
+                    headers={
+                        "Authorization": f"Basic {credentials}",
+                        "Content-Type": watson_content_type,
+                    },
+                    content=audio_bytes,
+                    params={
+                        "model": "en-US_BroadbandModel",
+                        "smart_formatting": "true",
+                        "profanity_filter": "false",
+                        "max_alternatives": "1",
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+            results = data.get("results", [])
+            if results:
+                alt = results[0].get("alternatives", [{}])[0]
+                transcript = alt.get("transcript", "").strip()
+                confidence = float(alt.get("confidence", 0.9))
+                return TranscribeResponse(
+                    transcript=transcript,
+                    confidence=confidence,
+                    source="watson_stt",
+                )
+            return TranscribeResponse(transcript="", confidence=0.0, source="watson_stt")
+
+        except Exception as e:
+            logger.warning(f"Watson STT error: {e} — returning empty transcript")
+            return TranscribeResponse(transcript="", confidence=0.0, source="watson_stt_error")
+
+    # Watson not configured — inform the client to use browser Web Speech API
+    return TranscribeResponse(
+        transcript="",
+        confidence=0.0,
+        source="browser_fallback",
+    )

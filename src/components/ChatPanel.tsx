@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, MessageSquare } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Send, Bot, User, Loader2, MessageSquare, Mic, MicOff, AlertCircle } from 'lucide-react';
 import type {
   DesignResponse, SimulationResponse, OptimizationResponse,
   BOMResponse, SupplyChainResponse, PredictionsResponse,
@@ -19,6 +19,8 @@ interface Message {
   content: string;
   source?: string;
 }
+
+type RecordingState = 'idle' | 'recording' | 'processing';
 
 function buildContext(
   design: DesignResponse | null,
@@ -144,6 +146,122 @@ const QUICK_QUESTIONS_WITH_DESIGN = [
   'Explain the yield prediction',
 ];
 
+// ─── Speech-to-text hook ──────────────────────────────────────────────────────
+
+function useSpeechToText(onTranscript: (text: string) => void) {
+  const [recordingState, setRecordingState] = useState<RecordingState>('idle');
+  const [micError, setMicError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    setMicError(null);
+
+    // ── Try browser Web Speech API first (works without a server key) ──────
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      const recognition: SpeechRecognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => setRecordingState('recording');
+      recognition.onend = () => setRecordingState('idle');
+      recognition.onerror = (e) => {
+        setRecordingState('idle');
+        if (e.error === 'not-allowed') {
+          setMicError('Microphone access denied');
+        } else if (e.error !== 'no-speech') {
+          setMicError(`STT error: ${e.error}`);
+        }
+      };
+      recognition.onresult = (event) => {
+        const transcript = event.results[0]?.[0]?.transcript || '';
+        if (transcript) onTranscript(transcript);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+      return;
+    }
+
+    // ── Fallback: MediaRecorder → Watson STT backend ───────────────────────
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        setRecordingState('processing');
+        stream.getTracks().forEach((t) => t.stop());
+
+        try {
+          const blob = new Blob(chunksRef.current, { type: mimeType });
+          const formData = new FormData();
+          formData.append('audio', blob, 'audio.webm');
+
+          const resp = await fetch('/api/orchestration/transcribe', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.transcript) {
+              onTranscript(data.transcript);
+            }
+          }
+        } catch (err) {
+          setMicError('Transcription failed');
+        } finally {
+          setRecordingState('idle');
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecordingState('recording');
+    } catch (err: any) {
+      setMicError(err?.message?.includes('Permission') ? 'Microphone access denied' : 'Mic unavailable');
+      setRecordingState('idle');
+    }
+  }, [onTranscript]);
+
+  const toggle = useCallback(() => {
+    if (recordingState === 'idle') {
+      startRecording();
+    } else if (recordingState === 'recording') {
+      stopRecording();
+    }
+  }, [recordingState, startRecording, stopRecording]);
+
+  return { recordingState, micError, toggle, setMicError };
+}
+
+// ─── ChatPanel component ──────────────────────────────────────────────────────
+
 export function ChatPanel({
   design, simulation, optimization, bom, supplyChain, predictions,
 }: ChatPanelProps) {
@@ -159,6 +277,13 @@ export function ChatPanel({
 
   const hasDesign = !!design?.architecture;
   const quickQuestions = hasDesign ? QUICK_QUESTIONS_WITH_DESIGN : QUICK_QUESTIONS_NO_DESIGN;
+
+  const appendTranscript = useCallback((text: string) => {
+    setInput((prev) => (prev ? `${prev} ${text}` : text));
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, []);
+
+  const { recordingState, micError, toggle: toggleMic, setMicError } = useSpeechToText(appendTranscript);
 
   const sendMessage = async () => {
     const text = input.trim();
@@ -208,6 +333,13 @@ export function ChatPanel({
     }
   };
 
+  const micLabel =
+    recordingState === 'recording'
+      ? 'Stop recording'
+      : recordingState === 'processing'
+      ? 'Processing…'
+      : 'Start voice input';
+
   return (
     <div className="flex flex-col h-full bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden">
       {/* Header */}
@@ -219,6 +351,19 @@ export function ChatPanel({
           <p className="text-xs font-semibold text-zinc-200 truncate">AI Design Co-Pilot</p>
           <p className="text-[10px] text-zinc-500 truncate">IBM watsonx Orchestrate</p>
         </div>
+        {/* Mic status indicator in header */}
+        {recordingState === 'recording' && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/30">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+            <span className="text-[9px] text-red-400 font-mono uppercase">REC</span>
+          </div>
+        )}
+        {recordingState === 'processing' && (
+          <div className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30">
+            <Loader2 size={9} className="text-amber-400 animate-spin" />
+            <span className="text-[9px] text-amber-400 font-mono uppercase">STT</span>
+          </div>
+        )}
         <div className={`w-2 h-2 rounded-full flex-shrink-0 ${hasDesign ? 'bg-emerald-400' : 'bg-amber-400/60'}`} />
       </div>
 
@@ -248,6 +393,9 @@ export function ChatPanel({
                 </button>
               ))}
             </div>
+            <p className="text-[9px] text-zinc-700 mt-1">
+              Tap <Mic size={9} className="inline" /> to speak your question
+            </p>
           </div>
         )}
 
@@ -298,20 +446,60 @@ export function ChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      {/* Input — always enabled */}
+      {/* Mic error banner */}
+      {micError && (
+        <div className="mx-3 mb-1 px-2 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center gap-1.5">
+          <AlertCircle size={10} className="text-red-400 flex-shrink-0" />
+          <p className="text-[10px] text-red-400 flex-1">{micError}</p>
+          <button onClick={() => setMicError(null)} className="text-[9px] text-red-500 hover:text-red-300">✕</button>
+        </div>
+      )}
+
+      {/* Input row */}
       <div className="p-3 border-t border-zinc-800 bg-zinc-900/40">
         <div className="flex gap-2 items-end">
+          {/* Mic button — left corner of input row */}
+          <button
+            onClick={toggleMic}
+            disabled={loading || recordingState === 'processing'}
+            aria-label={micLabel}
+            title={micLabel}
+            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
+              recordingState === 'recording'
+                ? 'bg-red-600 hover:bg-red-500 shadow-[0_0_12px_rgba(239,68,68,0.5)] animate-pulse'
+                : recordingState === 'processing'
+                ? 'bg-amber-600/60'
+                : 'bg-zinc-800 hover:bg-zinc-700 border border-zinc-700'
+            }`}
+          >
+            {recordingState === 'recording'
+              ? <MicOff size={13} className="text-white" />
+              : recordingState === 'processing'
+              ? <Loader2 size={13} className="text-amber-300 animate-spin" />
+              : <Mic size={13} className="text-zinc-300" />
+            }
+          </button>
+
+          {/* Text input */}
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={hasDesign ? 'Ask about your chip design…' : 'Ask about chip design, processes, trade-offs…'}
+            placeholder={
+              recordingState === 'recording'
+                ? '🔴 Listening… speak now'
+                : hasDesign
+                ? 'Ask about your chip design…'
+                : 'Ask about chip design, processes, trade-offs…'
+            }
             disabled={loading}
             rows={1}
             className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ maxHeight: '80px', overflowY: 'auto' }}
           />
+
+          {/* Send button — right corner */}
           <button
             onClick={sendMessage}
             disabled={!input.trim() || loading}

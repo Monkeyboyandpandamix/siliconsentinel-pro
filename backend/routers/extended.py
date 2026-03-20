@@ -84,11 +84,11 @@ async def get_manufacturability(design_id: int, db: AsyncSession = Depends(get_d
     # Cost efficiency (15%)
     cost_score = min(100, yield_score * 0.8 + 20)
 
-    # Sustainability (15%)
-    carbon = estimate_carbon_footprint(
-        arch.get("process_node", "28nm"),
-        total_area,
-        10000,
+    # Sustainability (15%) — must await the async estimator
+    carbon = await estimate_carbon_footprint(
+        process_node_name=arch.get("process_node", "28nm"),
+        die_area_mm2=total_area,
+        volume=10000,
     )
     co2_per_chip = carbon["co2e_per_chip_kg"]
     sustainability_score = max(0, min(100, 100 - co2_per_chip * 500))
@@ -144,8 +144,10 @@ async def compare_designs(req: CompareRequest, db: AsyncSession = Depends(get_db
         total_area = arch.get("total_area_mm2", 0)
         total_power = arch.get("total_power_mw", 0)
         yield_data = compute_yield_prediction(total_area, pn)
-        carbon = estimate_carbon_footprint(
-            arch.get("process_node", "28nm"), total_area, 10000
+        carbon = await estimate_carbon_footprint(
+            process_node_name=arch.get("process_node", "28nm"),
+            die_area_mm2=total_area,
+            volume=10000,
         )
 
         comparisons.append({

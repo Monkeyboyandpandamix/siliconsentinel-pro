@@ -1,9 +1,9 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Cpu, Layers, Activity, ShoppingCart, Truck,
   Factory, ShieldCheck, ChevronRight, ChevronLeft,
-  Wand2, BarChart3, AlertCircle, Loader2, TrendingUp
+  Wand2, BarChart3, AlertCircle, Loader2, TrendingUp, Mic, MicOff
 } from 'lucide-react';
 import { api } from './services/api';
 import type {
@@ -40,8 +40,40 @@ const STEPS = [
   { id: 8, title: 'Quality', icon: ShieldCheck, description: 'QC & Feedback' },
 ];
 
-const PROCESS_NODES = ['5nm', '7nm', '14nm', '28nm', '65nm', '180nm'];
-const DOMAINS = ['IoT', 'Automotive', 'Consumer', 'Industrial', 'Wearable', 'Data Center'];
+const PROCESS_NODES = ['3nm', '5nm', '7nm', '10nm', '14nm', '22nm', '28nm', '40nm', '65nm', '90nm', '130nm', '180nm', '350nm'];
+const DOMAINS = ['IoT', 'Automotive', 'Consumer', 'Industrial', 'Wearable', 'AI/HPC', 'Data Center', 'Aerospace', 'Medical'];
+
+// ─── App-level STT (Web Speech API) for Step 1 textarea ──────────────────────
+function useDescriptionMic(onResult: (t: string) => void) {
+  const [recording, setRecording] = useState(false);
+  const recRef = useRef<SpeechRecognition | null>(null);
+
+  const toggle = useCallback(() => {
+    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRec) return;
+
+    if (recording) {
+      recRef.current?.stop();
+      setRecording(false);
+      return;
+    }
+
+    const r: SpeechRecognition = new SpeechRec();
+    r.continuous = false;
+    r.interimResults = false;
+    r.lang = 'en-US';
+    r.onstart = () => setRecording(true);
+    r.onend = () => setRecording(false);
+    r.onresult = (e: SpeechRecognitionEvent) => {
+      const t = e.results[0]?.[0]?.transcript || '';
+      if (t) onResult(t);
+    };
+    recRef.current = r;
+    r.start();
+  }, [recording, onResult]);
+
+  return { recording, toggle };
+}
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -91,6 +123,11 @@ export default function App() {
     const id = setInterval(fetchHealth, 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // Step 1 voice input
+  const { recording: descMicRecording, toggle: toggleDescMic } = useDescriptionMic(
+    useCallback((t: string) => setPrompt((p) => p ? `${p} ${t}` : t), [])
+  );
 
   // Accessibility
   const [a11y, setA11y] = useState<AccessibilityPrefs>({
@@ -373,12 +410,30 @@ export default function App() {
                     </div>
 
                     <div>
-                      <label htmlFor="nl-input" className="block text-xs uppercase font-mono text-zinc-500 mb-1">Chip Description</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label htmlFor="nl-input" className="text-xs uppercase font-mono text-zinc-500">Chip Description</label>
+                        <button
+                          type="button"
+                          onClick={toggleDescMic}
+                          title={descMicRecording ? 'Stop voice input' : 'Dictate chip description'}
+                          aria-label={descMicRecording ? 'Stop recording' : 'Start voice input'}
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] transition-all ${
+                            descMicRecording
+                              ? 'bg-red-500/20 border border-red-500/30 text-red-400 animate-pulse'
+                              : 'bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+                          }`}
+                        >
+                          {descMicRecording
+                            ? <><MicOff size={10} /> Stop</>
+                            : <><Mic size={10} /> Speak</>
+                          }
+                        </button>
+                      </div>
                       <textarea
                         id="nl-input"
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
-                        placeholder="e.g., I need a low-power BLE chip for a wearable heart rate monitor with integrated power management and 64KB SRAM..."
+                        placeholder={descMicRecording ? '🔴 Listening… describe your chip' : 'e.g., I need a low-power BLE chip for a wearable heart rate monitor with integrated power management and 64KB SRAM...'}
                         className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none resize-none text-sm"
                         aria-required="true"
                       />
