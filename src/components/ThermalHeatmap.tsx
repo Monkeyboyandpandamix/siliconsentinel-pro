@@ -147,11 +147,20 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
     mappedBlocks.forEach(({ bx, by, bw, bh, block }) => {
       const isHovered = hoveredZone === block.id;
       const zone = thermal.zones.find(z => z.block_id === block.id);
-      const zoneColor = zone
-        ? zone.status === 'CRITICAL' ? '#ef4444'
-          : zone.status === 'WARNING' ? '#f59e0b'
-          : '#22c55e'
+      const zoneHotColor = zone
+        ? (() => {
+          const norm = Math.min(1, Math.max(0, (zone.temperature_c - tMin) / Math.max(tRange, 1e-6)));
+          const [r, g, b] = tempToRGB(norm);
+          return `rgb(${r},${g},${b})`;
+        })()
         : '#6366f1';
+      const zoneColor = zone
+        ? zone.status === 'CRITICAL'
+          ? '#ef4444'
+          : zone.status === 'WARNING'
+            ? '#f59e0b'
+            : zoneHotColor
+        : zoneHotColor;
 
       // Block outline
       ctx.strokeStyle = isHovered ? zoneColor : 'rgba(255,255,255,0.3)';
@@ -177,7 +186,11 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
         const tempStr = `${zone.temperature_c.toFixed(0)}°C`;
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillStyle = zone.status === 'CRITICAL' ? '#ef4444' : zone.status === 'WARNING' ? '#f59e0b' : '#22c55e';
+        ctx.fillStyle = zone.status === 'CRITICAL'
+          ? '#ef4444'
+          : zone.status === 'WARNING'
+            ? '#f59e0b'
+            : zoneHotColor;
         ctx.fillText(tempStr, bx + bw / 2, by + bh / 2 + 4);
         ctx.textAlign = 'start';
 
@@ -310,28 +323,43 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
         <div className="border-t border-zinc-800/60 p-3">
           <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-2">Block Temperature Zones</p>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
-            {thermal.zones.map(z => (
-              <div
-                key={z.block_id}
-                className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
-                  hoveredZone === z.block_id ? 'bg-zinc-700/50 ring-1 ring-zinc-600' : 'bg-zinc-800/40 hover:bg-zinc-800/70'
-                }`}
-                onMouseEnter={() => setHoveredZone(z.block_id)}
-                onMouseLeave={() => setHoveredZone(null)}
-              >
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                  z.status === 'CRITICAL' ? 'bg-red-500 ring-2 ring-red-500/30' :
-                  z.status === 'WARNING' ? 'bg-amber-500' : 'bg-emerald-500 '
-                }`} />
-                <span className="text-zinc-300 truncate flex-1 font-mono text-[10px]">{z.block_name}</span>
-                <span className="text-zinc-200 font-mono font-bold text-[10px] ml-auto">{z.temperature_c.toFixed(0)}°C</span>
-                <span className={`text-[9px] font-bold px-1 rounded ${
-                  z.status === 'CRITICAL' ? 'text-red-400 bg-red-500/10' :
-                  z.status === 'WARNING' ? 'text-amber-400 bg-amber-500/10' :
-                  'text-emerald-400'
-                }`}>{z.status}</span>
-              </div>
-            ))}
+            {thermal.zones.map(z => {
+              const tRangeZones = Math.max(thermal.max_temp_c - thermal.min_temp_c, 1e-6);
+              const norm = Math.min(1, Math.max(0, (z.temperature_c - thermal.min_temp_c) / tRangeZones));
+              const [r, g, b] = tempToRGB(norm);
+              const safeColor = `rgb(${r},${g},${b})`;
+
+              return (
+                <div
+                  key={z.block_id}
+                  className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                    hoveredZone === z.block_id ? 'bg-zinc-700/50 ring-1 ring-zinc-600' : 'bg-zinc-800/40 hover:bg-zinc-800/70'
+                  }`}
+                  onMouseEnter={() => setHoveredZone(z.block_id)}
+                  onMouseLeave={() => setHoveredZone(null)}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      z.status === 'CRITICAL'
+                        ? 'bg-red-500 ring-2 ring-red-500/30'
+                        : z.status === 'WARNING'
+                          ? 'bg-amber-500'
+                          : ''
+                    }`}
+                    style={z.status === 'SAFE' ? { backgroundColor: safeColor } : undefined}
+                  />
+                  <span className="text-zinc-300 truncate flex-1 font-mono text-[10px]">{z.block_name}</span>
+                  <span className="text-zinc-200 font-mono font-bold text-[10px] ml-auto">{z.temperature_c.toFixed(0)}°C</span>
+                  <span className={`text-[9px] font-bold px-1 rounded ${
+                    z.status === 'CRITICAL'
+                      ? 'text-red-400 bg-red-500/10'
+                      : z.status === 'WARNING'
+                        ? 'text-amber-400 bg-amber-500/10'
+                        : 'text-emerald-400'
+                  }`}>{z.status}</span>
+                </div>
+              );
+            })}
           </div>
 
           {/* Thermal gradient legend */}
