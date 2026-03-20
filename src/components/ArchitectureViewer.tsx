@@ -6,26 +6,26 @@ interface Props {
   architecture: ArchitectureBlueprint;
 }
 
-const BLOCK_COLORS: Record<string, { fill: string; stroke: string; glow: string }> = {
-  cpu:         { fill: '#ef4444', stroke: '#f87171', glow: 'rgba(239,68,68,0.25)' },
-  memory:      { fill: '#3b82f6', stroke: '#60a5fa', glow: 'rgba(59,130,246,0.25)' },
-  io:          { fill: '#10b981', stroke: '#34d399', glow: 'rgba(16,185,129,0.25)' },
-  power:       { fill: '#f59e0b', stroke: '#fbbf24', glow: 'rgba(245,158,11,0.25)' },
-  rf:          { fill: '#8b5cf6', stroke: '#a78bfa', glow: 'rgba(139,92,246,0.25)' },
-  analog:      { fill: '#ec4899', stroke: '#f472b6', glow: 'rgba(236,72,153,0.25)' },
-  dsp:         { fill: '#06b6d4', stroke: '#22d3ee', glow: 'rgba(6,182,212,0.25)' },
-  accelerator: { fill: '#f97316', stroke: '#fb923c', glow: 'rgba(249,115,22,0.25)' },
+const BLOCK_COLORS: Record<string, { fill: string; stroke: string; glow: string; text: string }> = {
+  cpu:         { fill: '#ef4444', stroke: '#f87171', glow: 'rgba(239,68,68,0.3)',   text: '#fca5a5' },
+  memory:      { fill: '#3b82f6', stroke: '#60a5fa', glow: 'rgba(59,130,246,0.3)',  text: '#93c5fd' },
+  io:          { fill: '#10b981', stroke: '#34d399', glow: 'rgba(16,185,129,0.3)',  text: '#6ee7b7' },
+  power:       { fill: '#f59e0b', stroke: '#fbbf24', glow: 'rgba(245,158,11,0.3)',  text: '#fcd34d' },
+  rf:          { fill: '#8b5cf6', stroke: '#a78bfa', glow: 'rgba(139,92,246,0.3)',  text: '#c4b5fd' },
+  analog:      { fill: '#ec4899', stroke: '#f472b6', glow: 'rgba(236,72,153,0.3)',  text: '#f9a8d4' },
+  dsp:         { fill: '#06b6d4', stroke: '#22d3ee', glow: 'rgba(6,182,212,0.3)',   text: '#67e8f9' },
+  accelerator: { fill: '#f97316', stroke: '#fb923c', glow: 'rgba(249,115,22,0.3)',  text: '#fdba74' },
 };
 
 function getColor(type: string) {
   return BLOCK_COLORS[type] || BLOCK_COLORS.cpu;
 }
 
-const MIN_BLOCK_W = 80;
-const MIN_BLOCK_H = 50;
-const CANVAS_W = 900;
-const CANVAS_H = 600;
-const CHIP_PAD = 50;
+const MIN_BLOCK_W = 90;
+const MIN_BLOCK_H = 58;
+const CANVAS_W = 920;
+const CANVAS_H = 580;
+const CHIP_PAD = 52;
 
 interface LayoutBlock extends BlockSpec {
   lx: number;
@@ -45,35 +45,16 @@ function computeLayout(blocks: BlockSpec[]): LayoutBlock[] {
   const areaRange = maxArea - minArea || 1;
 
   const scaled = blocks.map(b => {
-    const areaFrac = 0.4 + 0.6 * ((b.area_mm2 - minArea) / areaRange);
-    const maxBlockW = innerW / 3;
-    const maxBlockH = innerH / 3;
-    const w = Math.max(MIN_BLOCK_W, Math.min(maxBlockW, areaFrac * maxBlockW));
-    const h = Math.max(MIN_BLOCK_H, Math.min(maxBlockH, areaFrac * maxBlockH));
+    const areaFrac = 0.45 + 0.55 * ((b.area_mm2 - minArea) / areaRange);
+    const maxBlockW = innerW / Math.ceil(Math.sqrt(blocks.length));
+    const maxBlockH = innerH / Math.ceil(Math.sqrt(blocks.length));
+    const w = Math.max(MIN_BLOCK_W, Math.min(maxBlockW - 12, areaFrac * maxBlockW));
+    const h = Math.max(MIN_BLOCK_H, Math.min(maxBlockH - 12, areaFrac * maxBlockH));
     return { ...b, lw: w, lh: h, lx: 0, ly: 0 };
   });
 
-  const aiPositionsUsable = hasReasonablePositions(blocks);
-
-  if (aiPositionsUsable) {
-    scaled.forEach(b => {
-      b.lx = CHIP_PAD + (b.x / 100) * (innerW - b.lw);
-      b.ly = CHIP_PAD + (b.y / 100) * (innerH - b.lh);
-    });
-    resolveOverlaps(scaled);
-  } else {
-    gridLayout(scaled);
-  }
-
+  gridLayout(scaled);
   return scaled;
-}
-
-function hasReasonablePositions(blocks: BlockSpec[]): boolean {
-  if (blocks.length <= 1) return true;
-  const positions = blocks.map(b => ({ x: b.x, y: b.y }));
-  const xs = new Set(positions.map(p => Math.round(p.x / 5)));
-  const ys = new Set(positions.map(p => Math.round(p.y / 5)));
-  return xs.size >= Math.min(blocks.length, 2) || ys.size >= Math.min(blocks.length, 2);
 }
 
 function gridLayout(blocks: LayoutBlock[]) {
@@ -85,64 +66,121 @@ function gridLayout(blocks: LayoutBlock[]) {
   blocks.forEach((b, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    b.lw = Math.min(b.lw, cellW - 16);
-    b.lh = Math.min(b.lh, cellH - 16);
+    b.lw = Math.min(b.lw, cellW - 18);
+    b.lh = Math.min(b.lh, cellH - 18);
     b.lx = CHIP_PAD + col * cellW + (cellW - b.lw) / 2;
     b.ly = CHIP_PAD + row * cellH + (cellH - b.lh) / 2;
   });
 }
 
-function resolveOverlaps(blocks: LayoutBlock[]) {
-  const pad = 8;
-  for (let iter = 0; iter < 50; iter++) {
-    let moved = false;
-    for (let i = 0; i < blocks.length; i++) {
-      for (let j = i + 1; j < blocks.length; j++) {
-        const a = blocks[i], b = blocks[j];
-        const overlapX = (a.lx + a.lw + pad) - b.lx;
-        const overlapY = (a.ly + a.lh + pad) - b.ly;
-        if (overlapX > 0 && (a.ly < b.ly + b.lh + pad && a.ly + a.lh + pad > b.ly)) {
-          const overlapXR = (b.lx + b.lw + pad) - a.lx;
-          const overlapYT = (a.ly + a.lh + pad) - b.ly;
-          const overlapYB = (b.ly + b.lh + pad) - a.ly;
-          if (overlapX > 0 && overlapXR > 0 && overlapYT > 0 && overlapYB > 0) {
-            const shift = Math.min(overlapX, overlapXR, overlapYT, overlapYB);
-            if (shift === overlapX || shift === overlapXR) {
-              a.lx -= shift / 2;
-              b.lx += shift / 2;
-            } else {
-              a.ly -= shift / 2;
-              b.ly += shift / 2;
-            }
-            moved = true;
-          }
-        }
-      }
-    }
-    if (!moved) break;
-  }
-  clampToChip(blocks);
+function clampToChip(b: LayoutBlock) {
+  b.lx = Math.max(CHIP_PAD + 4, Math.min(CANVAS_W - CHIP_PAD - 4 - b.lw, b.lx));
+  b.ly = Math.max(CHIP_PAD + 4, Math.min(CANVAS_H - CHIP_PAD - 4 - b.lh, b.ly));
 }
 
-function clampToChip(blocks: LayoutBlock[]) {
-  const minX = CHIP_PAD + 6;
-  const minY = CHIP_PAD + 6;
-  const maxX = CANVAS_W - CHIP_PAD - 6;
-  const maxY = CANVAS_H - CHIP_PAD - 6;
-  blocks.forEach(b => {
-    b.lx = Math.max(minX, Math.min(maxX - b.lw, b.lx));
-    b.ly = Math.max(minY, Math.min(maxY - b.lh, b.ly));
-  });
+// Draw an L-shaped manhattan wire between two blocks
+function wirePathBetween(a: LayoutBlock, b: LayoutBlock): string {
+  // Exit from right or bottom of source, enter left or top of target
+  const ax = a.lx + a.lw / 2;
+  const ay = a.ly + a.lh / 2;
+  const bx = b.lx + b.lw / 2;
+  const by = b.ly + b.lh / 2;
+
+  // Use a stepped path with rounded corners
+  const dx = bx - ax;
+  const dy = by - ay;
+
+  if (Math.abs(dx) > Math.abs(dy)) {
+    // Mostly horizontal: exit right/left of source
+    const exitX = dx > 0 ? a.lx + a.lw : a.lx;
+    const enterX = dx > 0 ? b.lx : b.lx + b.lw;
+    const midX = (exitX + enterX) / 2;
+    return `M ${exitX} ${ay} C ${midX} ${ay} ${midX} ${by} ${enterX} ${by}`;
+  } else {
+    // Mostly vertical: exit top/bottom of source
+    const exitY = dy > 0 ? a.ly + a.lh : a.ly;
+    const enterY = dy > 0 ? b.ly : b.ly + b.lh;
+    const midY = (exitY + enterY) / 2;
+    return `M ${ax} ${exitY} C ${ax} ${midY} ${bx} ${midY} ${bx} ${enterY}`;
+  }
 }
 
 export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [showWiring, setShowWiring] = useState(true);
   const [selectedBlock, setSelectedBlock] = useState<LayoutBlock | null>(null);
-  const [hoveredBlock, setHoveredBlock] = useState<string | null>(null);
   const layoutRef = useRef<LayoutBlock[]>([]);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  const zoomGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const wiringGroupRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
+  const showWiringRef = useRef(showWiring);
+  showWiringRef.current = showWiring;
+
+  const redrawWires = useCallback(() => {
+    const wg = wiringGroupRef.current;
+    const layout = layoutRef.current;
+    if (!wg) return;
+    wg.selectAll('*').remove();
+    if (!showWiringRef.current) return;
+
+    const blockMap = new Map(layout.map(b => [b.id, b]));
+
+    layout.forEach(block => {
+      block.connections.forEach(targetId => {
+        const target = blockMap.get(targetId);
+        if (!target) return;
+
+        const path = wirePathBetween(block, target);
+        const c = getColor(block.type);
+
+        // Shadow wire
+        wg.append('path')
+          .attr('d', path)
+          .attr('fill', 'none')
+          .attr('stroke', '#000')
+          .attr('stroke-width', 4)
+          .attr('stroke-opacity', 0.25)
+          .attr('stroke-linecap', 'round');
+
+        // Main wire
+        wg.append('path')
+          .attr('class', `wire wire-from-${block.id} wire-to-${targetId}`)
+          .attr('d', path)
+          .attr('fill', 'none')
+          .attr('stroke', c.stroke)
+          .attr('stroke-width', 2)
+          .attr('stroke-opacity', 0.65)
+          .attr('stroke-linecap', 'round')
+          .attr('marker-end', `url(#arrow-${block.type})`);
+
+        // Label at midpoint
+        const ax = block.lx + block.lw / 2;
+        const ay = block.ly + block.lh / 2;
+        const bx = target.lx + target.lw / 2;
+        const by = target.ly + target.lh / 2;
+        const lx = (ax + bx) / 2;
+        const ly = (ay + by) / 2 - 5;
+        const busLabel = `${block.type.toUpperCase()}→${target.type.toUpperCase()}`;
+
+        wg.append('rect')
+          .attr('x', lx - 18).attr('y', ly - 7)
+          .attr('width', 36).attr('height', 11)
+          .attr('rx', 3)
+          .attr('fill', '#09090b')
+          .attr('opacity', 0.7);
+
+        wg.append('text')
+          .attr('x', lx).attr('y', ly + 1)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '6px')
+          .attr('font-family', 'monospace')
+          .attr('fill', c.text)
+          .attr('opacity', 0.8)
+          .attr('pointer-events', 'none')
+          .text(busLabel);
+      });
+    });
+  }, []);
 
   const resetZoom = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
@@ -154,10 +192,10 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
   const fitToView = useCallback(() => {
     if (!svgRef.current || !zoomRef.current || !layoutRef.current.length) return;
     const blocks = layoutRef.current;
-    const xMin = Math.min(...blocks.map(b => b.lx)) - 20;
-    const yMin = Math.min(...blocks.map(b => b.ly)) - 20;
-    const xMax = Math.max(...blocks.map(b => b.lx + b.lw)) + 20;
-    const yMax = Math.max(...blocks.map(b => b.ly + b.lh)) + 20;
+    const xMin = Math.min(...blocks.map(b => b.lx)) - 24;
+    const yMin = Math.min(...blocks.map(b => b.ly)) - 24;
+    const xMax = Math.max(...blocks.map(b => b.lx + b.lw)) + 24;
+    const yMax = Math.max(...blocks.map(b => b.ly + b.lh)) + 24;
     const bw = xMax - xMin;
     const bh = yMax - yMin;
     const scale = Math.min(CANVAS_W / bw, CANVAS_H / bh, 1.5) * 0.9;
@@ -176,32 +214,48 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
 
     const layout = computeLayout(architecture.blocks);
     layoutRef.current = layout;
-    const blockMap = new Map(layout.map(b => [b.id, b]));
 
-    // Defs for filters and gradients
+    // ── Defs ───────────────────────────────────────────────────────────────
     const defs = svg.append('defs');
 
-    defs.append('filter')
-      .attr('id', 'block-shadow')
-      .attr('x', '-20%').attr('y', '-20%')
-      .attr('width', '140%').attr('height', '140%')
+    defs.append('filter').attr('id', 'block-shadow')
+      .attr('x', '-20%').attr('y', '-20%').attr('width', '140%').attr('height', '140%')
       .append('feDropShadow')
-      .attr('dx', 0).attr('dy', 2).attr('stdDeviation', 4)
-      .attr('flood-color', 'rgba(0,0,0,0.5)');
+      .attr('dx', 0).attr('dy', 3).attr('stdDeviation', 5)
+      .attr('flood-color', 'rgba(0,0,0,0.6)');
 
-    defs.append('filter')
-      .attr('id', 'glow')
-      .attr('x', '-50%').attr('y', '-50%')
-      .attr('width', '200%').attr('height', '200%')
-      .append('feGaussianBlur')
-      .attr('stdDeviation', 6)
-      .attr('result', 'coloredBlur');
+    defs.append('filter').attr('id', 'glow-filter')
+      .attr('x', '-50%').attr('y', '-50%').attr('width', '200%').attr('height', '200%')
+      .append('feGaussianBlur').attr('stdDeviation', 7).attr('result', 'coloredBlur');
 
-    // Zoom container
+    // Arrowhead markers per block type
+    Object.entries(BLOCK_COLORS).forEach(([type, c]) => {
+      const marker = defs.append('marker')
+        .attr('id', `arrow-${type}`)
+        .attr('viewBox', '0 0 8 8')
+        .attr('refX', 7).attr('refY', 4)
+        .attr('markerWidth', 5).attr('markerHeight', 5)
+        .attr('orient', 'auto-start-reverse');
+      marker.append('path')
+        .attr('d', 'M 0 0 L 8 4 L 0 8 z')
+        .attr('fill', c.stroke)
+        .attr('opacity', 0.75);
+    });
+
+    // ── Zoom ───────────────────────────────────────────────────────────────
     const zoomGroup = svg.append('g').attr('class', 'zoom-container');
+    zoomGroupRef.current = zoomGroup;
 
     const zoom = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.3, 4])
+      .scaleExtent([0.25, 5])
+      .filter((event) => {
+        // Prevent zoom from interfering with block drag
+        if (event.type === 'mousedown' && event.target) {
+          const el = event.target as Element;
+          if (el.closest('.block')) return false;
+        }
+        return true;
+      })
       .on('zoom', (event) => {
         zoomGroup.attr('transform', event.transform);
       });
@@ -209,134 +263,85 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
     svg.on('dblclick.zoom', null);
     zoomRef.current = zoom;
 
-    // Background grid
-    const gridGroup = zoomGroup.append('g').attr('class', 'grid');
-    for (let x = 0; x <= CANVAS_W; x += 20) {
-      gridGroup.append('line')
+    // ── Background grid ────────────────────────────────────────────────────
+    const gridG = zoomGroup.append('g').attr('class', 'grid');
+    for (let x = 0; x <= CANVAS_W; x += 24) {
+      gridG.append('line')
         .attr('x1', x).attr('y1', 0).attr('x2', x).attr('y2', CANVAS_H)
-        .attr('stroke', '#1a1a1f').attr('stroke-width', 0.5);
+        .attr('stroke', '#131316').attr('stroke-width', 0.5);
     }
-    for (let y = 0; y <= CANVAS_H; y += 20) {
-      gridGroup.append('line')
+    for (let y = 0; y <= CANVAS_H; y += 24) {
+      gridG.append('line')
         .attr('x1', 0).attr('y1', y).attr('x2', CANVAS_W).attr('y2', y)
-        .attr('stroke', '#1a1a1f').attr('stroke-width', 0.5);
+        .attr('stroke', '#131316').attr('stroke-width', 0.5);
     }
 
-    // Chip die outline
+    // ── Chip die outline ───────────────────────────────────────────────────
     zoomGroup.append('rect')
-      .attr('x', CHIP_PAD - 10).attr('y', CHIP_PAD - 10)
-      .attr('width', CANVAS_W - (CHIP_PAD - 10) * 2)
-      .attr('height', CANVAS_H - (CHIP_PAD - 10) * 2)
+      .attr('x', CHIP_PAD - 12).attr('y', CHIP_PAD - 12)
+      .attr('width', CANVAS_W - (CHIP_PAD - 12) * 2)
+      .attr('height', CANVAS_H - (CHIP_PAD - 12) * 2)
       .attr('fill', '#0a0a0f')
-      .attr('stroke', '#27272a').attr('stroke-width', 2).attr('rx', 6);
+      .attr('stroke', '#27272a').attr('stroke-width', 2.5).attr('rx', 8);
 
-    // Bond pad ring
-    const padRing = zoomGroup.append('g').attr('class', 'pad-ring');
-    const padCount = 24;
-    const padSize = 6;
-    const ringX = CHIP_PAD - 4;
-    const ringY = CHIP_PAD - 4;
-    const ringW = CANVAS_W - (CHIP_PAD - 4) * 2;
-    const ringH = CANVAS_H - (CHIP_PAD - 4) * 2;
-    for (let i = 0; i < padCount; i++) {
-      // Top
-      padRing.append('rect')
-        .attr('x', ringX + (i + 0.5) * (ringW / padCount) - padSize / 2).attr('y', ringY - padSize)
-        .attr('width', padSize).attr('height', padSize)
-        .attr('fill', '#3f3f46').attr('rx', 1);
-      // Bottom
-      padRing.append('rect')
-        .attr('x', ringX + (i + 0.5) * (ringW / padCount) - padSize / 2).attr('y', ringY + ringH)
-        .attr('width', padSize).attr('height', padSize)
-        .attr('fill', '#3f3f46').attr('rx', 1);
+    // Bond pads
+    const padG = zoomGroup.append('g');
+    const padSize = 5;
+    const ringX = CHIP_PAD - 6, ringY = CHIP_PAD - 6;
+    const ringW = CANVAS_W - (CHIP_PAD - 6) * 2;
+    const ringH = CANVAS_H - (CHIP_PAD - 6) * 2;
+    const padCols = 28;
+    for (let i = 0; i < padCols; i++) {
+      const pxFrac = (i + 0.5) / padCols;
+      [[ringX + pxFrac * ringW - padSize / 2, ringY - padSize],
+       [ringX + pxFrac * ringW - padSize / 2, ringY + ringH]].forEach(([px, py]) => {
+        padG.append('rect').attr('x', px).attr('y', py)
+          .attr('width', padSize).attr('height', padSize)
+          .attr('fill', '#3f3f46').attr('rx', 1);
+      });
     }
-    for (let i = 0; i < Math.floor(padCount * (ringH / ringW)); i++) {
-      const vertCount = Math.floor(padCount * (ringH / ringW));
-      // Left
-      padRing.append('rect')
-        .attr('x', ringX - padSize).attr('y', ringY + (i + 0.5) * (ringH / vertCount) - padSize / 2)
-        .attr('width', padSize).attr('height', padSize)
-        .attr('fill', '#3f3f46').attr('rx', 1);
-      // Right
-      padRing.append('rect')
-        .attr('x', ringX + ringW).attr('y', ringY + (i + 0.5) * (ringH / vertCount) - padSize / 2)
-        .attr('width', padSize).attr('height', padSize)
-        .attr('fill', '#3f3f46').attr('rx', 1);
-    }
-
-    // Process label
-    zoomGroup.append('text')
-      .text(`${architecture.process_node} | ${architecture.metal_layers}M | ${architecture.substrate} | ${architecture.interconnect}`)
-      .attr('x', CHIP_PAD).attr('y', CHIP_PAD - 16)
-      .attr('fill', '#3f3f46').attr('font-size', '9px').attr('font-family', 'monospace');
-
-    // Wiring layer
-    const wiringGroup = zoomGroup.append('g').attr('class', 'wiring');
-
-    function drawWires() {
-      wiringGroup.selectAll('*').remove();
-      if (!showWiring) return;
-
-      layout.forEach(block => {
-        block.connections.forEach(targetId => {
-          const target = blockMap.get(targetId);
-          if (!target) return;
-
-          const x1 = block.lx + block.lw / 2;
-          const y1 = block.ly + block.lh / 2;
-          const x2 = target.lx + target.lw / 2;
-          const y2 = target.ly + target.lh / 2;
-
-          const isHighlighted = hoveredBlock === block.id || hoveredBlock === targetId;
-          const opacity = hoveredBlock ? (isHighlighted ? 0.9 : 0.1) : 0.4;
-          const width = isHighlighted ? 2.5 : 1.2;
-
-          // Manhattan routing
-          const midX = (x1 + x2) / 2;
-          const path = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`;
-
-          wiringGroup.append('path')
-            .attr('d', path)
-            .attr('fill', 'none')
-            .attr('stroke', isHighlighted ? '#818cf8' : '#4f46e5')
-            .attr('stroke-width', width)
-            .attr('stroke-opacity', opacity)
-            .attr('stroke-dasharray', isHighlighted ? 'none' : '6,3')
-            .style('transition', 'stroke-opacity 0.15s, stroke-width 0.15s');
-
-          // Junction dots
-          [{ cx: midX, cy: y1 }, { cx: midX, cy: y2 }].forEach(pt => {
-            wiringGroup.append('circle')
-              .attr('cx', pt.cx).attr('cy', pt.cy).attr('r', isHighlighted ? 3 : 2)
-              .attr('fill', '#6366f1').attr('opacity', opacity);
-          });
-        });
+    const padRows = Math.round(padCols * ringH / ringW);
+    for (let i = 0; i < padRows; i++) {
+      const pyFrac = (i + 0.5) / padRows;
+      [[ringX - padSize, ringY + pyFrac * ringH - padSize / 2],
+       [ringX + ringW, ringY + pyFrac * ringH - padSize / 2]].forEach(([px, py]) => {
+        padG.append('rect').attr('x', px).attr('y', py)
+          .attr('width', padSize).attr('height', padSize)
+          .attr('fill', '#3f3f46').attr('rx', 1);
       });
     }
 
-    drawWires();
+    // Process node label
+    zoomGroup.append('text')
+      .text(`${architecture.process_node} · ${architecture.metal_layers}M · ${architecture.substrate} · ${architecture.interconnect}`)
+      .attr('x', CHIP_PAD - 10).attr('y', CHIP_PAD - 17)
+      .attr('fill', '#52525b').attr('font-size', '8.5px').attr('font-family', 'monospace');
 
-    // Block groups
+    // ── Wiring layer (drawn below blocks) ──────────────────────────────────
+    const wiringGroup = zoomGroup.append('g').attr('class', 'wiring');
+    wiringGroupRef.current = wiringGroup;
+    redrawWires();
+
+    // ── Blocks ─────────────────────────────────────────────────────────────
     const blocksGroup = zoomGroup.append('g').attr('class', 'blocks');
 
+    // Drag handler — uses delta (dx/dy) divided by zoom scale for accuracy
     const drag = d3.drag<SVGGElement, LayoutBlock>()
-      .on('start', function (event, d) {
+      .on('start', function (_event, d) {
         d3.select(this).raise();
-        d3.select(this).select('.block-rect')
-          .attr('stroke-width', 3);
         setSelectedBlock(d);
       })
       .on('drag', function (event, d) {
-        d.lx = Math.max(CHIP_PAD + 6, Math.min(CANVAS_W - CHIP_PAD - 6 - d.lw, event.x - d.lw / 2));
-        d.ly = Math.max(CHIP_PAD + 6, Math.min(CANVAS_H - CHIP_PAD - 6 - d.lh, event.y - d.lh / 2));
-
+        // Get current zoom transform to scale deltas correctly
+        const k = svgRef.current ? d3.zoomTransform(svgRef.current).k : 1;
+        d.lx += event.dx / k;
+        d.ly += event.dy / k;
+        clampToChip(d);
         d3.select(this).attr('transform', `translate(${d.lx}, ${d.ly})`);
-        drawWires();
+        redrawWires();
       })
       .on('end', function (_event, d) {
-        d3.select(this).select('.block-rect')
-          .attr('stroke-width', 2);
-        setSelectedBlock(d);
+        setSelectedBlock({ ...d });
       });
 
     const blockG = blocksGroup.selectAll<SVGGElement, LayoutBlock>('g.block')
@@ -345,153 +350,181 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
       .attr('class', 'block')
       .attr('transform', d => `translate(${d.lx}, ${d.ly})`)
       .style('cursor', 'grab')
-      .call(drag as unknown as (selection: d3.Selection<SVGGElement, LayoutBlock, SVGGElement, unknown>) => void);
+      .call(drag as unknown as (s: d3.Selection<SVGGElement, LayoutBlock, SVGGElement, unknown>) => void);
 
     // Glow underlay
     blockG.append('rect')
       .attr('class', 'block-glow')
-      .attr('x', -4).attr('y', -4)
-      .attr('width', d => d.lw + 8).attr('height', d => d.lh + 8)
-      .attr('rx', 8)
+      .attr('x', -6).attr('y', -6)
+      .attr('width', d => d.lw + 12).attr('height', d => d.lh + 12)
+      .attr('rx', 10)
       .attr('fill', d => getColor(d.type).glow)
-      .attr('filter', 'url(#glow)')
+      .attr('filter', 'url(#glow-filter)')
       .attr('opacity', 0);
 
-    // Block rectangle
+    // Main block body
     blockG.append('rect')
       .attr('class', 'block-rect')
       .attr('width', d => d.lw).attr('height', d => d.lh)
-      .attr('rx', 6)
+      .attr('rx', 7)
       .attr('fill', d => getColor(d.type).fill)
-      .attr('fill-opacity', 0.12)
+      .attr('fill-opacity', 0.13)
       .attr('stroke', d => getColor(d.type).stroke)
-      .attr('stroke-width', 2)
+      .attr('stroke-width', 1.8)
       .attr('filter', 'url(#block-shadow)');
 
-    // Type indicator stripe
+    // Type accent stripe
     blockG.append('rect')
       .attr('x', 0).attr('y', 0)
       .attr('width', 4).attr('height', d => d.lh)
-      .attr('rx', 2)
+      .attr('rx', 3)
       .attr('fill', d => getColor(d.type).fill)
-      .attr('fill-opacity', 0.6);
+      .attr('fill-opacity', 0.7);
+
+    // Type badge (top-right)
+    blockG.append('rect')
+      .attr('x', d => d.lw - 32).attr('y', 4)
+      .attr('width', 28).attr('height', 12)
+      .attr('rx', 4)
+      .attr('fill', d => getColor(d.type).fill)
+      .attr('fill-opacity', 0.25);
+
+    blockG.append('text')
+      .attr('x', d => d.lw - 18).attr('y', 13)
+      .attr('text-anchor', 'middle')
+      .attr('fill', d => getColor(d.type).text)
+      .attr('font-size', '7px')
+      .attr('font-family', 'monospace')
+      .attr('font-weight', '700')
+      .attr('pointer-events', 'none')
+      .text(d => d.type.toUpperCase());
 
     // Block name
     blockG.append('text')
       .attr('class', 'block-label')
-      .text(d => d.name)
       .attr('x', d => d.lw / 2)
-      .attr('y', d => d.lh / 2 - 8)
-      .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-      .attr('fill', 'white').attr('font-size', '11px')
+      .attr('y', d => d.lh / 2 - 9)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'white')
+      .attr('font-size', '11px')
       .attr('font-family', "'JetBrains Mono', 'Fira Code', monospace")
       .attr('font-weight', '600')
       .attr('pointer-events', 'none')
       .each(function (d) {
-        const textEl = d3.select(this);
-        const maxWidth = d.lw - 16;
-        let text = d.name;
-        while (text.length > 3) {
-          const node = textEl.node();
-          if (node && node.getComputedTextLength() <= maxWidth) break;
-          text = text.slice(0, -1);
-          textEl.text(text + '...');
+        const el = d3.select(this);
+        const maxW = d.lw - 20;
+        let txt = d.name;
+        el.text(txt);
+        const node = el.node();
+        if (node) {
+          while (txt.length > 3 && node.getComputedTextLength() > maxW) {
+            txt = txt.slice(0, -1);
+            el.text(txt + '…');
+          }
         }
       });
 
-    // Block metrics
+    // Power metric
     blockG.append('text')
-      .text(d => `${d.power_mw.toFixed(1)}mW`)
-      .attr('x', d => d.lw / 2)
-      .attr('y', d => d.lh / 2 + 6)
-      .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.5)').attr('font-size', '9px')
-      .attr('font-family', "'JetBrains Mono', 'Fira Code', monospace")
-      .attr('pointer-events', 'none');
+      .attr('x', d => d.lw / 2).attr('y', d => d.lh / 2 + 7)
+      .attr('text-anchor', 'middle')
+      .attr('fill', d => getColor(d.type).text)
+      .attr('fill-opacity', 0.75)
+      .attr('font-size', '9.5px')
+      .attr('font-family', 'monospace')
+      .attr('pointer-events', 'none')
+      .text(d => {
+        const p = d.power_mw;
+        return p >= 1000 ? `${(p / 1000).toFixed(1)} W` : `${p.toFixed(0)} mW`;
+      });
 
+    // Area metric
     blockG.append('text')
-      .text(d => `${d.area_mm2.toFixed(2)}mm²`)
-      .attr('x', d => d.lw / 2)
-      .attr('y', d => d.lh / 2 + 18)
-      .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-      .attr('fill', 'rgba(255,255,255,0.35)').attr('font-size', '8px')
-      .attr('font-family', "'JetBrains Mono', 'Fira Code', monospace")
-      .attr('pointer-events', 'none');
+      .attr('x', d => d.lw / 2).attr('y', d => d.lh / 2 + 20)
+      .attr('text-anchor', 'middle')
+      .attr('fill', 'rgba(255,255,255,0.35)')
+      .attr('font-size', '8px')
+      .attr('font-family', 'monospace')
+      .attr('pointer-events', 'none')
+      .text(d => `${d.area_mm2.toFixed(2)} mm²`);
 
-    // Hover interactions
+    // ── Hover ──────────────────────────────────────────────────────────────
     blockG
-      .on('mouseenter', function (_event, d) {
-        setHoveredBlock(d.id);
-
+      .on('mouseenter', function (_e, d) {
         d3.select(this).select('.block-glow')
-          .transition().duration(150)
-          .attr('opacity', 1);
-
+          .transition().duration(120).attr('opacity', 1);
         d3.select(this).select('.block-rect')
-          .transition().duration(150)
-          .attr('fill-opacity', 0.22)
-          .attr('stroke-width', 2.5);
+          .transition().duration(120).attr('fill-opacity', 0.25).attr('stroke-width', 2.5);
+
+        // Highlight connected wires
+        wiringGroupRef.current?.selectAll('path.wire')
+          .attr('stroke-opacity', (_, __, nodes) => {
+            const el = nodes[__] as Element;
+            const cls = el.getAttribute('class') || '';
+            return cls.includes(`wire-from-${d.id}`) || cls.includes(`wire-to-${d.id}`) ? 1 : 0.1;
+          })
+          .attr('stroke-width', (_, __, nodes) => {
+            const el = nodes[__] as Element;
+            const cls = el.getAttribute('class') || '';
+            return cls.includes(`wire-from-${d.id}`) || cls.includes(`wire-to-${d.id}`) ? 3 : 1.5;
+          });
 
         // Dim non-connected blocks
-        blockG.filter((b: LayoutBlock) => b.id !== d.id && !d.connections.includes(b.id) && !b.connections.includes(d.id))
-          .transition().duration(150)
-          .attr('opacity', 0.3);
+        blockG.filter((b: LayoutBlock) =>
+          b.id !== d.id && !d.connections.includes(b.id) && !b.connections.includes(d.id)
+        ).transition().duration(120).attr('opacity', 0.25);
       })
       .on('mouseleave', function () {
-        setHoveredBlock(null);
-
-        d3.select(this).select('.block-glow')
-          .transition().duration(200)
-          .attr('opacity', 0);
-
+        d3.select(this).select('.block-glow').transition().duration(200).attr('opacity', 0);
         d3.select(this).select('.block-rect')
-          .transition().duration(200)
-          .attr('fill-opacity', 0.12)
-          .attr('stroke-width', 2);
+          .transition().duration(200).attr('fill-opacity', 0.13).attr('stroke-width', 1.8);
+
+        wiringGroupRef.current?.selectAll('path.wire')
+          .attr('stroke-opacity', 0.65).attr('stroke-width', 2);
 
         blockG.transition().duration(200).attr('opacity', 1);
       })
-      .on('click', function (_event, d) {
-        setSelectedBlock(prev => prev?.id === d.id ? null : d);
+      .on('click', function (_e, d) {
+        setSelectedBlock(prev => prev?.id === d.id ? null : { ...d });
       });
 
     // Entrance animation
     blockG.attr('opacity', 0)
-      .transition().duration(400)
-      .delay((_d: LayoutBlock, i: number) => i * 60)
+      .transition().duration(350)
+      .delay((_d: LayoutBlock, i: number) => i * 50)
       .attr('opacity', 1);
 
-  }, [architecture, showWiring, hoveredBlock]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [architecture]);
 
-  const blockTypes = Array.from(new Set(architecture.blocks.map(b => b.type))) as string[];
+  // Redraw wires when showWiring changes without full re-render
+  useEffect(() => {
+    redrawWires();
+  }, [showWiring, redrawWires]);
+
+  const blockTypes = Array.from(new Set(architecture.blocks.map(b => b.type)));
 
   return (
-    <div ref={containerRef} className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden">
+    <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden">
       {/* Toolbar */}
       <div className="flex justify-between items-center px-4 py-3 border-b border-zinc-800/60 bg-zinc-900/80">
         <div>
           <h3 className="text-zinc-100 font-bold text-sm tracking-wide">Architecture Blueprint</h3>
           <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest mt-0.5">
-            Physical Floorplan &amp; Routing — Drag blocks to rearrange, scroll to zoom
+            Drag blocks · Scroll to zoom · Hover to trace connections
           </p>
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <button
-            onClick={() => setShowWiring(!showWiring)}
+            onClick={() => setShowWiring(v => !v)}
             className={`px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all ${showWiring ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'bg-zinc-800 border-zinc-700 text-zinc-500'}`}
           >
-            {showWiring ? 'Wiring: ON' : 'Wiring: OFF'}
+            {showWiring ? '⟵ Wiring ON' : '⟵ Wiring OFF'}
           </button>
-          <button
-            onClick={fitToView}
-            className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all"
-          >
+          <button onClick={fitToView} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
             Fit
           </button>
-          <button
-            onClick={resetZoom}
-            className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all"
-          >
+          <button onClick={resetZoom} className="px-2.5 py-1 rounded-md text-[10px] font-bold border bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 transition-all">
             Reset
           </button>
         </div>
@@ -501,44 +534,41 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
       <div className="flex gap-3 px-4 py-2 border-b border-zinc-800/40 bg-zinc-950/40 flex-wrap">
         {blockTypes.map(t => (
           <span key={t} className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono uppercase tracking-wide">
-            <span
-              className="w-2.5 h-2.5 rounded-sm inline-block border"
-              style={{
-                backgroundColor: getColor(t).fill,
-                borderColor: getColor(t).stroke,
-                opacity: 0.8,
-              }}
-            />
+            <span className="w-2.5 h-2.5 rounded-sm inline-block border"
+              style={{ backgroundColor: getColor(t).fill, borderColor: getColor(t).stroke, opacity: 0.85 }} />
             {t}
           </span>
         ))}
+        {showWiring && (
+          <span className="flex items-center gap-1.5 text-[10px] text-zinc-600 font-mono ml-auto">
+            Curved lines = data buses · arrows show flow direction
+          </span>
+        )}
       </div>
 
-      {/* SVG Canvas */}
+      {/* SVG canvas */}
       <svg
         ref={svgRef}
         width="100%"
-        height="520"
+        height="500"
         viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="Chip architecture floorplan — interactive"
+        aria-label="Chip architecture floorplan — interactive drag"
         className="bg-zinc-950"
         style={{ touchAction: 'none' }}
       />
 
-      {/* Block Detail Panel */}
+      {/* Selected block detail */}
       {selectedBlock && (
         <div className="px-4 py-3 border-t border-zinc-800/60 bg-zinc-900/80">
           <div className="flex justify-between items-start">
             <div>
               <div className="flex items-center gap-2">
-                <span
-                  className="w-3 h-3 rounded-sm inline-block"
-                  style={{ backgroundColor: getColor(selectedBlock.type).fill }}
-                />
+                <span className="w-3 h-3 rounded-sm inline-block" style={{ backgroundColor: getColor(selectedBlock.type).fill }} />
                 <span className="text-zinc-100 font-bold text-sm font-mono">{selectedBlock.name}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono uppercase">
+                <span className="text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase"
+                  style={{ color: getColor(selectedBlock.type).text, borderColor: getColor(selectedBlock.type).stroke + '50', backgroundColor: getColor(selectedBlock.type).fill + '20' }}>
                   {selectedBlock.type}
                 </span>
               </div>
@@ -546,18 +576,14 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
                 <p className="text-zinc-500 text-xs mt-1 max-w-xl">{selectedBlock.description}</p>
               )}
             </div>
-            <button
-              onClick={() => setSelectedBlock(null)}
-              className="text-zinc-500 hover:text-zinc-300 text-xs font-bold transition-colors"
-            >
-              Close
-            </button>
+            <button onClick={() => setSelectedBlock(null)} className="text-zinc-500 hover:text-zinc-300 text-xs font-bold transition-colors">✕</button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2.5">
-            <MetricPill label="Power" value={`${selectedBlock.power_mw.toFixed(2)} mW`} />
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-2.5">
+            <MetricPill label="Power" value={selectedBlock.power_mw >= 1000 ? `${(selectedBlock.power_mw / 1000).toFixed(2)} W` : `${selectedBlock.power_mw.toFixed(1)} mW`} />
             <MetricPill label="Area" value={`${selectedBlock.area_mm2.toFixed(3)} mm²`} />
-            {selectedBlock.clock_mhz && <MetricPill label="Clock" value={`${selectedBlock.clock_mhz} MHz`} />}
+            {selectedBlock.clock_mhz && <MetricPill label="Clock" value={`${selectedBlock.clock_mhz.toLocaleString()} MHz`} />}
             <MetricPill label="Connections" value={`${selectedBlock.connections.length} link${selectedBlock.connections.length !== 1 ? 's' : ''}`} />
+            <MetricPill label="Power Density" value={`${(selectedBlock.power_mw / Math.max(selectedBlock.area_mm2, 0.01)).toFixed(0)} mW/mm²`} />
           </div>
         </div>
       )}

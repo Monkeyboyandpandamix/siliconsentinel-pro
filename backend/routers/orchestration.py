@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from typing import Any
 import httpx
 import json
+import logging
 
 from backend.database import get_db
 from backend.config import get_settings
@@ -13,6 +14,7 @@ from backend.schemas.orchestration import OrchestrationOrderResponse, PipelineSt
 from backend.services.orchestrator import OrchestratorService
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ─── Pipeline status ─────────────────────────────────────────────────────────
@@ -156,7 +158,7 @@ def build_context_prefix(ctx: dict[str, Any]) -> str:
 
 
 async def _get_iam_token(api_key: str) -> str:
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(
             "https://iam.cloud.ibm.com/identity/token",
             data={"apikey": api_key, "grant_type": "urn:ibm:params:oauth:grant-type:apikey"},
@@ -166,7 +168,7 @@ async def _get_iam_token(api_key: str) -> str:
         return resp.json()["access_token"]
 
 
-async def _call_watson_orchestrate(message: str, context_prefix: str, settings) -> str:
+async def _call_watson_orchestrate(message: str, context_prefix: str, history: list, settings) -> str:
     api_key = settings.watson_orchestrate_api_key
     orch_url = settings.watson_orchestrate_url.rstrip("/")
     instance_id = settings.watson_orchestrate_instance_id
@@ -174,122 +176,264 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, settings) 
 
     if not api_key:
         raise ValueError("Watson Orchestrate API key not configured")
-    if not orch_url or not instance_id:
-        raise ValueError("Watson Orchestrate URL/instance not configured")
+    if not orch_url:
+        raise ValueError("Watson Orchestrate URL not configured")
+    if not instance_id:
+        raise ValueError("Watson Orchestrate Instance ID not configured")
 
     token = await _get_iam_token(api_key)
-
-    # Watson Orchestrate agent session API
-    base = f"{orch_url}/instances/{instance_id}"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-    # Build session endpoint — try agent-specific path first, fall back to default assistant
-    session_paths = []
-    if agent_id:
-        session_paths.append(f"{base}/v2/agents/{agent_id}/sessions")
-    session_paths.append(f"{base}/v2/assistants/default/sessions")
+    # Watson Orchestrate / Watson Assistant v2 API paths
+    # The assistant_id is the agent_id for Watson Orchestrate
+    assistant_id = agent_id if agent_id else "default"
 
-    session_id = None
-    async with httpx.AsyncClient(timeout=30) as client:
-        for sess_path in session_paths:
-            sess_resp = await client.post(sess_path, headers=headers)
-            if sess_resp.status_code in (200, 201):
-                session_id = sess_resp.json().get("session_id")
-                break
+    # Try multiple URL patterns for Watson Orchestrate
+    base_candidates = [
+        f"{orch_url}/instances/{instance_id}",  # with instance prefix
+        orch_url,                                 # without instance prefix (some deployments)
+    ]
 
-        if not session_id:
-            raise ValueError(f"Could not create Watson Orchestrate session")
+    session_id: str | None = None
+    working_base: str | None = None
 
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        for base in base_candidates:
+            # Watson Orchestrate uses /v2/assistants/{id}/sessions
+            sess_path = f"{base}/v2/assistants/{assistant_id}/sessions"
+            try:
+                sess_resp = await client.post(sess_path, headers=headers)
+                logger.warning(
+                    f"WxO Session {sess_path}: HTTP {sess_resp.status_code} "
+                    f"body={sess_resp.text[:300]}"
+                )
+                if sess_resp.status_code in (200, 201):
+                    session_id = sess_resp.json().get("session_id")
+                    working_base = base
+                    break
+            except Exception as e:
+                logger.warning(f"WxO Session attempt failed for {sess_path}: {e}")
+                continue
+
+        if not session_id or not working_base:
+            raise ValueError("Could not create Watson Orchestrate session — check URL/instance/agent configuration")
+
+        # Build input with conversation history
         full_message = f"{context_prefix}\nUser question: {message}"
 
-        # Try agent-specific message endpoint
-        msg_paths = []
-        if agent_id:
-            msg_paths.append(f"{base}/v2/agents/{agent_id}/sessions/{session_id}/message")
-        msg_paths.append(f"{base}/v2/assistants/default/sessions/{session_id}/message")
+        # Include last few exchanges for continuity
+        conversation_turns = []
+        for h in history[-4:]:
+            if h.role == "user":
+                conversation_turns.append({"role": "user", "text": h.content})
 
-        for msg_path in msg_paths:
-            msg_resp = await client.post(
-                msg_path,
-                headers=headers,
-                json={"input": {"text": full_message}},
-            )
-            if msg_resp.status_code == 200:
-                data = msg_resp.json()
-                output = data.get("output", {})
-                texts = [r.get("text", "") for r in output.get("generic", []) if r.get("response_type") == "text"]
-                return " ".join(texts).strip() or "No response from agent."
+        msg_path = f"{working_base}/v2/assistants/{assistant_id}/sessions/{session_id}/message"
+        msg_payload = {
+            "input": {
+                "message_type": "text",
+                "text": full_message,
+                "options": {"return_context": True},
+            }
+        }
 
-        raise ValueError(f"Watson Orchestrate message failed")
+        msg_resp = await client.post(msg_path, headers=headers, json=msg_payload)
+        logger.info(f"Message response: HTTP {msg_resp.status_code}")
+
+        if msg_resp.status_code != 200:
+            raise ValueError(f"Watson Orchestrate message failed: HTTP {msg_resp.status_code} — {msg_resp.text[:300]}")
+
+        data = msg_resp.json()
+        output = data.get("output", {})
+
+        # Extract text from generic responses
+        texts = []
+        for r in output.get("generic", []):
+            if r.get("response_type") == "text" and r.get("text"):
+                texts.append(r["text"])
+
+        reply = " ".join(texts).strip()
+        if not reply:
+            # Try alternate response locations
+            reply = output.get("text", "")
+        if not reply:
+            reply = "I processed your request but received an empty response from the agent."
+
+        return reply
 
 
-def _physics_fallback_response(message: str, ctx: dict[str, Any]) -> str:
+def _smart_fallback_response(message: str, ctx: dict[str, Any]) -> str:
+    """
+    Intelligent physics-based fallback when Watson Orchestrate is unavailable.
+    Provides detailed, context-aware answers about the chip design.
+    """
     msg_lower = message.lower()
     arch = ctx.get("architecture", {})
     sim = ctx.get("simulation", {})
     opt = ctx.get("optimization", {})
-    bom = ctx.get("bom", {})
+    bom_ctx = ctx.get("bom", {})
+    yield_ctx = ctx.get("yield", {})
+    sc = ctx.get("supply_chain", {})
 
-    if any(w in msg_lower for w in ["power", "watt", "mw", "energy"]):
-        total = arch.get("total_power_mw") or sim.get("total_power_mw", "unknown")
-        return (
-            f"The current design consumes {total} mW total. "
-            f"Dynamic power is {sim.get('dynamic_power_mw', 'N/A')} mW and "
-            f"static leakage is {sim.get('static_power_mw', 'N/A')} mW. "
-            "To reduce power, consider voltage scaling, clock gating, or reducing block frequencies."
+    blocks = arch.get("blocks", [])
+    process_node = arch.get("process_node", "N/A")
+    total_power = arch.get("total_power_mw") or sim.get("total_power_mw", 0)
+
+    # Power questions
+    if any(w in msg_lower for w in ["power", "watt", "mw", "energy", "leakage", "dynamic"]):
+        dyn = sim.get("dynamic_power_mw", "N/A")
+        static = sim.get("static_power_mw", "N/A")
+        eff = sim.get("power_efficiency_pct")
+        hungry = sorted(blocks, key=lambda b: b.get("power_mw", 0), reverse=True)[:2]
+        hungry_str = ", ".join(f"{b.get('name')} ({b.get('power_mw', 0):.0f} mW)" for b in hungry)
+        response = (
+            f"Your {process_node} design draws {total_power:.0f} mW total — "
+            f"{dyn} mW dynamic + {static} mW static leakage. "
         )
-    if any(w in msg_lower for w in ["thermal", "temperature", "heat", "hot"]):
+        if eff:
+            response += f"Power efficiency is {eff:.0f}%. "
+        if hungry_str:
+            response += f"Largest consumers: {hungry_str}. "
+        response += (
+            "To reduce power: apply clock gating on idle blocks, reduce VDD by 10% "
+            f"(cuts dynamic power ∝ V²), or gate the memory array when not accessed."
+        )
+        return response
+
+    # Thermal questions
+    if any(w in msg_lower for w in ["thermal", "temperature", "heat", "hot", "junction", "cooling"]):
         zones = sim.get("thermal_zones", [])
-        hot = next((z for z in zones if z.get("status") in ("CRITICAL", "WARNING")), None)
-        if hot:
+        critical = [z for z in zones if z.get("status") in ("CRITICAL", "WARNING")]
+        max_temp = max((z.get("temp_c", 0) for z in zones), default=0)
+        if critical:
+            hotspot = critical[0]
             return (
-                f"The {hot.get('block')} block is running at {hot.get('temp_c')}°C ({hot.get('status')}). "
-                "Consider adding heat spreading, reducing clock frequency for that block, or improving substrate thermal conductivity."
+                f"Thermal alert: {hotspot.get('block')} is at {hotspot.get('temp_c')}°C "
+                f"({hotspot.get('status')}). Max junction temperature across the die is {max_temp:.0f}°C. "
+                "Mitigation: add copper heat spreader, reduce block activity during thermal throttle, "
+                "or increase metal layer thermal vias under the hot block. "
+                "For automotive/industrial designs, target <125°C junction per AEC-Q100."
             )
-        return "Thermal profile looks acceptable — no critical hotspots detected."
-    if any(w in msg_lower for w in ["yield", "defect", "wafer"]):
-        y = ctx.get("yield", {})
         return (
-            f"Predicted yield is {y.get('yield_pct', 'N/A')}% "
-            f"(range {y.get('yield_low_pct', '?')}–{y.get('yield_high_pct', '?')}%) "
-            f"with defect density {y.get('defect_density_per_cm2', 'N/A')}/cm². "
-            f"Expect {y.get('good_dies_per_wafer', 'N/A')} good dies per wafer."
+            f"Thermal profile is healthy — max temperature {max_temp:.0f}°C across {len(zones)} monitored zones. "
+            f"All blocks within operating limits for {process_node}."
         )
-    if any(w in msg_lower for w in ["cost", "bom", "price", "budget", "expensive"]):
+
+    # Yield questions
+    if any(w in msg_lower for w in ["yield", "defect", "wafer", "manufacturing", "fabrication"]):
+        y_pct = yield_ctx.get("yield_pct", "N/A")
+        y_low = yield_ctx.get("yield_low_pct", "?")
+        y_high = yield_ctx.get("yield_high_pct", "?")
+        dpw = yield_ctx.get("good_dies_per_wafer", "N/A")
+        dd = yield_ctx.get("defect_density_per_cm2", "N/A")
         return (
-            f"The BOM covers {bom.get('component_count', 'N/A')} components. "
-            f"Per-unit cost is ${bom.get('cost_per_unit', 'N/A')} with total BOM cost ${bom.get('total_bom_cost', 'N/A')}. "
-            "Long lead-time parts are the main supply chain risk."
+            f"Predicted manufacturing yield: {y_pct}% (confidence range {y_low}–{y_high}%). "
+            f"Expect {dpw} good dies per {process_node} wafer at defect density {dd}/cm². "
+            "Yield is primarily limited by die area — smaller dies pack more per wafer. "
+            "To improve: reduce redundant routing, apply DFM rules, or use a more mature process node."
         )
-    if any(w in msg_lower for w in ["optimiz", "improv", "better", "ppca"]):
+
+    # Cost / BOM questions
+    if any(w in msg_lower for w in ["cost", "bom", "price", "budget", "expensive", "cheap", "component"]):
+        comp_count = bom_ctx.get("component_count", "N/A")
+        per_unit = bom_ctx.get("cost_per_unit", "N/A")
+        bom_total = bom_ctx.get("total_bom_cost", "N/A")
+        long_lead = bom_ctx.get("long_lead_parts", [])
+        response = (
+            f"The BOM covers {comp_count} components. "
+            f"Per-unit cost (including fab, packaging, test, overhead): ${per_unit}. "
+            f"Raw BOM cost is ${bom_total}. "
+        )
+        if long_lead:
+            top = long_lead[0]
+            response += (
+                f"Critical lead-time bottleneck: {top.get('description')} "
+                f"({top.get('lead_time_days')} days, {top.get('availability')}). "
+                "Order long-lead parts immediately to avoid schedule slip."
+            )
+        return response
+
+    # Optimization / PPCA questions
+    if any(w in msg_lower for w in ["optim", "improv", "better", "ppca", "tradeoff", "reduce"]):
         imp = opt.get("improvement_pct", 0)
         changes = opt.get("changes_summary", [])
-        return (
-            f"Optimization achieved {imp}% improvement. "
-            + ("Key changes: " + "; ".join(changes[:3]) + "." if changes else "No optimization data yet.")
+        ppca_b = opt.get("ppca_before", {})
+        ppca_a = opt.get("ppca_after", {})
+        response = f"Optimization achieved {imp:.1f}% overall improvement. "
+        if ppca_b and ppca_a:
+            response += (
+                f"PPCA shift: power {ppca_b.get('power', '?')}→{ppca_a.get('power', '?')} | "
+                f"performance {ppca_b.get('performance', '?')}→{ppca_a.get('performance', '?')} | "
+                f"cost {ppca_b.get('cost', '?')}→{ppca_a.get('cost', '?')} | "
+                f"area {ppca_b.get('area', '?')}→{ppca_a.get('area', '?')}. "
+            )
+        if changes:
+            response += "Applied changes: " + "; ".join(changes[:3]) + "."
+        else:
+            response += "Run optimization with a specific focus (power, area, or performance) to see targeted improvements."
+        return response
+
+    # Timing / frequency questions
+    if any(w in msg_lower for w in ["timing", "clock", "frequency", "mhz", "delay", "slack", "setup", "hold"]):
+        max_clk = sim.get("max_clock_mhz", "N/A")
+        cp_delay = sim.get("critical_path_delay_ns", "N/A")
+        timing_met = sim.get("timing_met", None)
+        slack = sim.get("setup_slack_ns", None)
+        response = (
+            f"Maximum achievable clock: {max_clk} MHz (critical path delay: {cp_delay} ns). "
+            f"Timing constraints are {'✓ met' if timing_met else '✗ violated'}. "
         )
-    if any(w in msg_lower for w in ["timing", "clock", "frequency", "mhz", "delay"]):
+        if slack is not None:
+            response += f"Setup slack: {'+' if slack >= 0 else ''}{slack:.3f} ns. "
+        if not timing_met:
+            response += (
+                "To fix timing: reduce combinational logic depth on critical paths, "
+                "add pipeline registers to break long chains, or reduce target clock frequency."
+            )
+        return response
+
+    # Architecture / blocks questions
+    if any(w in msg_lower for w in ["architecture", "block", "floorplan", "design", "structure", "layout"]):
+        name = arch.get("name", "your chip")
+        area = arch.get("total_area_mm2", "N/A")
+        metal = arch.get("metal_layers", "N/A")
         return (
-            f"Max clock frequency is {sim.get('max_clock_mhz', 'N/A')} MHz. "
-            f"Critical path delay is {sim.get('critical_path_delay_ns', 'N/A')} ns. "
-            f"Timing constraints are {'met' if sim.get('timing_met') else 'violated'}."
+            f"{name} is a {process_node} design with {len(blocks)} functional blocks "
+            f"across {area} mm² die area and {metal} metal routing layers. "
+            f"Blocks: {', '.join(b.get('name', '') for b in blocks[:5])}{'...' if len(blocks) > 5 else ''}. "
+            "The architecture was generated to match your domain and constraints. "
+            "Use the floorplan viewer to drag blocks and explore timing-critical routing paths."
         )
-    if any(w in msg_lower for w in ["architecture", "block", "design"]):
-        name = arch.get("name", "your design")
-        blocks = arch.get("blocks", [])
-        return (
-            f"{name} uses {arch.get('process_node', 'N/A')} process with {len(blocks)} functional blocks "
-            f"across {arch.get('total_area_mm2', 'N/A')} mm² die area. "
-            f"Total power budget: {arch.get('total_power_mw', 'N/A')} mW."
-        )
+
+    # Supply chain questions
+    if any(w in msg_lower for w in ["supply", "fab", "foundry", "tsmc", "geopolit", "risk", "sourcing"]):
+        fabs = sc.get("fab_recommendations", [])
+        geo = sc.get("geo_risks", [])
+        if fabs:
+            top_fab = fabs[0]
+            return (
+                f"Top recommended fab: {top_fab.get('name')} ({top_fab.get('location')}) — "
+                f"overall score {top_fab.get('overall_score')}/100, risk score {top_fab.get('risk_score')}/100. "
+                + (f"Geopolitical risks: {', '.join(g.get('region') + ' (' + g.get('risk_level') + ')' for g in geo[:3])}. " if geo else "")
+                + "Dual-sourcing between geographically diverse fabs mitigates concentration risk."
+            )
+        return "Run the supply chain analysis step to get fab recommendations and geopolitical risk assessment."
+
+    # General / no context
     if not ctx:
         return (
-            "Hello! I'm your SiliconSentinel AI Co-Pilot. "
-            "Generate a chip architecture first to unlock full analysis — then ask me about power, thermals, yield, BOM costs, timing, or supply chain trade-offs."
+            "I'm your SiliconSentinel AI Co-Pilot, powered by IBM watsonx Orchestrate. "
+            "Generate a chip architecture first, then ask me about:\n"
+            "• Power consumption and efficiency\n"
+            "• Thermal hotspots and cooling\n"
+            "• Manufacturing yield and defect risk\n"
+            "• BOM costs and lead times\n"
+            "• Timing closure and critical paths\n"
+            "• Supply chain and fab recommendations"
         )
+
     return (
-        "I can help you analyze your chip design. Ask me about power consumption, "
-        "thermal profile, yield predictions, BOM costs, timing, or architecture trade-offs."
+        "I can analyze your chip design in detail. Ask me about power, thermals, yield, "
+        "BOM costs, timing closure, architecture trade-offs, or supply chain risks."
     )
 
 
@@ -299,8 +443,9 @@ async def orchestrate_chat(req: ChatRequest):
     context_prefix = build_context_prefix(req.context)
 
     try:
-        reply = await _call_watson_orchestrate(req.message, context_prefix, settings)
+        reply = await _call_watson_orchestrate(req.message, context_prefix, req.history, settings)
         return ChatResponse(reply=reply, source="watson_orchestrate")
-    except Exception:
-        reply = _physics_fallback_response(req.message, req.context)
-        return ChatResponse(reply=reply, source="physics_fallback")
+    except Exception as e:
+        logger.warning(f"Watson Orchestrate unavailable, using fallback: {e}")
+        reply = _smart_fallback_response(req.message, req.context)
+        return ChatResponse(reply=reply, source="ai_co_pilot")

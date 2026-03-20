@@ -497,7 +497,7 @@ export default function App() {
                     <PassFailBadge status={simulation.pass_fail} score={simulation.overall_score} />
                   </div>
 
-                  <SimulationResults simulation={simulation} />
+                  <SimulationResults simulation={simulation} processNode={arch.process_node} domain={domain} totalAreaMm2={arch.total_area_mm2} />
                   <ThermalHeatmap thermal={simulation.thermal} blocks={arch.blocks} />
 
                   {simulation.bottlenecks.length > 0 && (
