@@ -39,14 +39,16 @@ transistor density at the specified node.
 
 Block types must be one of: cpu, memory, io, power, rf, analog, dsp, accelerator
 
-For a BLE wearable chip at 28nm, typical blocks might consume:
-- ARM Cortex-M0+ core: ~0.5-2 mW active, ~0.3 mm²
-- SRAM 64KB: ~0.1-0.5 mW, ~0.15 mm²
-- BLE radio (RF transceiver): ~5-10 mW TX, ~1.0 mm²
-- Power management unit: ~0.05 mW, ~0.2 mm²
-- GPIO/peripherals: ~0.1 mW, ~0.1 mm²
+REFERENCE EXAMPLES for a BLE wearable at 28nm:
+- CPU: ARM Cortex-M4F (120 MHz), 1.2 mW, 0.35 mm², reference_component: "ARM Cortex-M4F IP (TSMC 28HPM)"
+- Memory: SRAM 256KB (TS1N28HPM), 0.3 mW, 0.55 mm², reference_component: "TSMC TS1N28HPMLVTA bitcell"
+- RF: BLE 5.2 Transceiver (Bluetooth 5.2), 7 mW TX, 1.1 mm², reference_component: "Nordic nRF52840-QDAA RF subsystem"
+- Power: PMIC (DCDC + LDO), 0.08 mW, 0.25 mm², reference_component: "TI TPS62840 DC/DC + TLV1117 LDO IP"
+- IO: GPIO/SPI/I2C/UART pad ring, 0.12 mW, 0.18 mm², reference_component: "TSMC 28HPM GPIO_18 standard pad cell"
 
-Scale appropriately for other applications and nodes.
+Scale reference_component, power, and area appropriately for the actual node and block function.
+cell_library should be the standard cell library for the process node (e.g. "TSMC 28HPM SC9 v2.1").
+voltage_domain: e.g. "VDD 1.0V", "VDD 1.8V core / 3.3V IO", "VDD 0.9V".
 
 Return ONLY valid JSON (no markdown, no explanation):
 {{
@@ -71,7 +73,10 @@ Return ONLY valid JSON (no markdown, no explanation):
       "height": <proportional to area>,
       "connections": ["<ids of connected blocks>"],
       "clock_mhz": <if clocked, null otherwise>,
-      "description": "<one-line technical description>"
+      "description": "<one-line technical description including key specs>",
+      "reference_component": "<specific IP core or standard cell reference, e.g. 'ARM Cortex-M4F IP (TSMC 28HPM)'>",
+      "cell_library": "<standard cell library name for this process node>",
+      "voltage_domain": "<voltage supply, e.g. 'VDD 1.0V core / 1.8V IO'>"
     }}
   ]
 }}"""

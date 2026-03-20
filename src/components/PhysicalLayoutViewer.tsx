@@ -14,6 +14,13 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import * as d3 from 'd3';
 import type { ArchitectureBlueprint, BlockSpec } from '../types';
 
+// Colours re-used from ArchitectureViewer for consistent component identity
+const BLUEPRINT_COLORS: Record<string, string> = {
+  cpu: '#f87171', memory: '#60a5fa', io: '#34d399',
+  power: '#fbbf24', rf: '#a78bfa', analog: '#f472b6',
+  dsp: '#22d3ee', accelerator: '#fb923c',
+};
+
 // ── Canvas constants ─────────────────────────────────────────────────────────
 const CW = 960;
 const CH = 620;
@@ -260,6 +267,9 @@ export const PhysicalLayoutViewer: React.FC<Props> = ({ architecture }) => {
   const [showRouting, setShowRouting] = useState(true);
   const [showPowerRails, setShowPowerRails] = useState(true);
   const [hoveredBlock, setHoveredBlock] = useState<string | null>(null);
+  const [selectedBlock, setSelectedBlock] = useState<BlockSpec | null>(null);
+  const selectedBlockRef = useRef<BlockSpec | null>(null);
+  selectedBlockRef.current = selectedBlock;
 
   const resetZoom = useCallback(() => {
     if (!svgRef.current || !zoomRef.current) return;
@@ -588,7 +598,7 @@ export const PhysicalLayoutViewer: React.FC<Props> = ({ architecture }) => {
           .text(`${b.area_mm2.toFixed(2)}mm² · ${b.power_mw.toFixed(0)}mW`);
       }
 
-      // Hover handlers
+      // Hover + click handlers
       g.on('mouseenter', function () {
         setHoveredBlock(b.id);
         d3.select(this).select('rect:first-child')
@@ -614,15 +624,37 @@ export const PhysicalLayoutViewer: React.FC<Props> = ({ architecture }) => {
       })
       .on('mouseleave', function () {
         setHoveredBlock(null);
+        // Keep selected block highlighted if it matches
+        const isSel = selectedBlockRef.current?.id === b.id;
         d3.select(this).select('rect:first-child')
-          .attr('stroke', BLOCK_STROKE).attr('stroke-width', 1.2);
+          .attr('stroke', isSel ? (BLUEPRINT_COLORS[b.type] ?? BLOCK_STROKE) : BLOCK_STROKE)
+          .attr('stroke-width', isSel ? 2.0 : 1.2);
         routeG.selectAll('line')
           .attr('stroke-opacity', 0.75).attr('stroke-width', function (this: SVGLineElement) {
             const cls = this.getAttribute('class') ?? '';
             return cls.includes('route') ? (this.getAttribute('stroke') === M2_COLOR ? 1.0 : 0.8) : 0.8;
           });
         blockG.selectAll('.phy-block').attr('opacity', 1);
-      });
+      })
+      .on('click', function () {
+        // Toggle selection
+        const currentSel = selectedBlockRef.current;
+        const origBlock = architecture.blocks.find(x => x.id === b.id) ?? null;
+        setSelectedBlock(currentSel?.id === b.id ? null : origBlock);
+        // Visual feedback: highlight selected block border with blueprint colour
+        blockG.selectAll<SVGGElement, unknown>('.phy-block').each(function () {
+          const cls = (this as SVGGElement).getAttribute('class') ?? '';
+          const isThis = cls.includes(b.id);
+          if (currentSel?.id !== b.id && isThis) {
+            d3.select(this).select('rect:first-child')
+              .attr('stroke', BLUEPRINT_COLORS[b.type] ?? BLOCK_STROKE).attr('stroke-width', 2.2);
+          } else if (currentSel?.id === b.id && isThis) {
+            d3.select(this).select('rect:first-child')
+              .attr('stroke', BLOCK_STROKE).attr('stroke-width', 1.2);
+          }
+        });
+      })
+      .style('cursor', 'pointer');
     });
 
     // ── Process metadata overlay ───────────────────────────────────────────────
@@ -682,7 +714,7 @@ export const PhysicalLayoutViewer: React.FC<Props> = ({ architecture }) => {
         <span className="text-white/50">● Via</span>
         <span style={{ color: VDD_COLOR }}>━ VDD rail</span>
         <span style={{ color: VSS_COLOR }}>┄ VSS rail</span>
-        <span className="text-zinc-600 ml-auto">Scroll=zoom · hover block=highlight nets</span>
+        <span className="text-zinc-600 ml-auto">Scroll=zoom · hover=nets · click=details</span>
       </div>
 
       {/* SVG Canvas */}
@@ -698,21 +730,91 @@ export const PhysicalLayoutViewer: React.FC<Props> = ({ architecture }) => {
         aria-label="Physical layout — pin-to-pin VLSI view"
       />
 
-      {/* Hovered block info */}
-      {hoveredBlock && (() => {
+      {/* Hover status bar (only when no block is selected) */}
+      {hoveredBlock && !selectedBlock && (() => {
         const b = architecture.blocks.find(x => x.id === hoveredBlock);
         if (!b) return null;
         return (
-          <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-900/80 flex items-center gap-4 text-[10px] font-mono">
+          <div className="px-4 py-2 border-t border-zinc-800 bg-zinc-900/70 flex items-center gap-4 text-[10px] font-mono">
             <span style={{ color: BLOCK_LABEL_COLOR[b.type] ?? '#60c8ff' }} className="font-bold">{b.name}</span>
-            <span className="text-zinc-500">TYPE: {b.type.toUpperCase()}</span>
-            <span className="text-zinc-400">AREA: {b.area_mm2.toFixed(3)} mm²</span>
-            <span className="text-zinc-400">POWER: {b.power_mw.toFixed(0)} mW</span>
-            <span className="text-zinc-500">NETS: {b.connections.length}</span>
-            <span className="text-zinc-600 text-[9px]">→ {b.connections.slice(0, 3).join(', ')}{b.connections.length > 3 ? `…+${b.connections.length - 3}` : ''}</span>
+            <span className="text-zinc-500">{b.type.toUpperCase()}</span>
+            <span className="text-zinc-400">{b.area_mm2.toFixed(3)} mm²</span>
+            <span className="text-zinc-400">{b.power_mw.toFixed(0)} mW</span>
+            {b.voltage_domain && <span className="text-amber-400/70">{b.voltage_domain}</span>}
+            <span className="text-zinc-600 ml-auto text-[9px]">Click to inspect</span>
           </div>
         );
       })()}
+
+      {/* Selected block detail panel — identical fields to Blueprint */}
+      {selectedBlock && (
+        <div className="px-4 py-3 border-t border-zinc-800/60 bg-zinc-900/90">
+          <div className="flex justify-between items-start gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className="w-3 h-3 rounded-sm inline-block flex-shrink-0 border"
+                  style={{
+                    backgroundColor: BLUEPRINT_COLORS[selectedBlock.type] + '33',
+                    borderColor: BLUEPRINT_COLORS[selectedBlock.type] ?? '#60c8ff',
+                  }}
+                />
+                <span className="text-zinc-100 font-bold text-sm font-mono">{selectedBlock.name}</span>
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded border font-mono uppercase"
+                  style={{
+                    color: BLOCK_LABEL_COLOR[selectedBlock.type] ?? '#60c8ff',
+                    borderColor: (BLUEPRINT_COLORS[selectedBlock.type] ?? '#60c8ff') + '50',
+                    backgroundColor: (BLUEPRINT_COLORS[selectedBlock.type] ?? '#60c8ff') + '18',
+                  }}
+                >
+                  {selectedBlock.type}
+                </span>
+                {selectedBlock.voltage_domain && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400 font-mono">
+                    {selectedBlock.voltage_domain}
+                  </span>
+                )}
+              </div>
+              {selectedBlock.description && (
+                <p className="text-zinc-500 text-xs mt-1">{selectedBlock.description}</p>
+              )}
+              {selectedBlock.reference_component && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span className="text-[9px] uppercase font-mono text-zinc-600">IP / Component:</span>
+                  <span className="text-[11px] font-mono text-cyan-400">{selectedBlock.reference_component}</span>
+                </div>
+              )}
+              {selectedBlock.cell_library && (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[9px] uppercase font-mono text-zinc-600">Cell Library:</span>
+                  <span className="text-[10px] font-mono text-zinc-500">{selectedBlock.cell_library}</span>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setSelectedBlock(null)}
+              className="text-zinc-500 hover:text-zinc-300 text-xs font-bold transition-colors flex-shrink-0"
+            >✕</button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-2.5">
+            <PhyMetricPill label="Power" value={selectedBlock.power_mw >= 1000 ? `${(selectedBlock.power_mw / 1000).toFixed(2)} W` : `${selectedBlock.power_mw.toFixed(1)} mW`} />
+            <PhyMetricPill label="Area" value={`${selectedBlock.area_mm2.toFixed(3)} mm²`} />
+            {selectedBlock.clock_mhz && <PhyMetricPill label="Clock" value={`${selectedBlock.clock_mhz.toLocaleString()} MHz`} />}
+            <PhyMetricPill label="Connections" value={`${selectedBlock.connections.length} net${selectedBlock.connections.length !== 1 ? 's' : ''}`} />
+            <PhyMetricPill label="Power Density" value={`${(selectedBlock.power_mw / Math.max(selectedBlock.area_mm2, 0.01)).toFixed(0)} mW/mm²`} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+
+function PhyMetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-zinc-800/60 rounded-lg px-3 py-1.5 border border-zinc-700/50">
+      <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-wider">{label}</div>
+      <div className="text-zinc-200 text-sm font-mono font-semibold">{value}</div>
+    </div>
+  );
+}

@@ -11,6 +11,9 @@ export interface BlockSpec {
   connections: string[];
   clock_mhz?: number | null;
   description?: string | null;
+  reference_component?: string | null;
+  cell_library?: string | null;
+  voltage_domain?: string | null;
 }
 
 export interface ArchitectureBlueprint {
