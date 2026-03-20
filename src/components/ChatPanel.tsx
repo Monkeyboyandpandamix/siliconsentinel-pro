@@ -347,12 +347,13 @@ export function ChatPanel({
         ...prev,
         { role: 'assistant', content: data.reply, source: data.source },
       ]);
-    } catch {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'An unexpected error occurred';
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: 'Sorry, I encountered an error. Please try again.',
+          content: `Sorry, I encountered an error: ${msg}. Please try again.`,
           source: 'error',
         },
       ]);

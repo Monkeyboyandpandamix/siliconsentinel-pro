@@ -32,9 +32,11 @@ function tempToRGB(norm: number): [number, number, number] {
   ];
 }
 
-// Given a canvas pad/size and block x position, map it correctly.
-// Block x/y values come from the physics provider in canvas units (0, 15, 30, ...).
-// We normalize them to 0–1 within the block bounding box.
+// Map physics coordinates to canvas pixels.
+// The backend thermal model (`compute_thermal_map`) treats block {x,y,width,height}
+// as 0–100 "die-normalized" units (it divides by 100 internally).
+// Therefore the frontend must use the same 0–100 coordinate system so the
+// block overlays align with the heat grid cells.
 function mapBlocksToCanvas(
   blocks: BlockSpec[],
   canvasW: number,
@@ -43,30 +45,49 @@ function mapBlocksToCanvas(
 ): Array<{ bx: number; by: number; bw: number; bh: number; block: BlockSpec }> {
   if (!blocks.length) return [];
 
-  // Find bounding box of block positions
-  const xs = blocks.map(b => b.x ?? 0);
-  const ys = blocks.map(b => b.y ?? 0);
-  const bboxX0 = Math.min(...xs);
-  const bboxY0 = Math.min(...ys);
-  const bboxX1 = Math.max(...xs.map((x, i) => x + (blocks[i].width ?? 12)));
-  const bboxY1 = Math.max(...ys.map((y, i) => y + (blocks[i].height ?? 12)));
-  const bboxW = Math.max(bboxX1 - bboxX0, 1);
-  const bboxH = Math.max(bboxY1 - bboxY0, 1);
-
   const innerW = canvasW - pad * 2;
   const innerH = canvasH - pad * 2;
+  const n = blocks.length;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const rows = Math.max(1, Math.ceil(n / cols));
+  const cellW = innerW / cols;
+  const cellH = innerH / rows;
 
-  return blocks.map(block => {
-    const relX = ((block.x ?? 0) - bboxX0) / bboxW;
-    const relY = ((block.y ?? 0) - bboxY0) / bboxH;
-    const relW = (block.width ?? 12) / bboxW;
-    const relH = (block.height ?? 12) / bboxH;
+  const areas = blocks.map(b => b.area_mm2 ?? 0);
+  const minArea = Math.min(...areas);
+  const maxArea = Math.max(...areas);
+  const areaRange = Math.max(maxArea - minArea, 1e-9);
 
+  return blocks.map((block, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+
+    const rawW = block.width ?? 12;
+    const rawH = block.height ?? 12;
+    const aspect = rawW / Math.max(rawH, 1e-6);
+
+    const area_mm2 = block.area_mm2 ?? 0;
+    const areaFrac = 0.45 + 0.55 * ((area_mm2 - minArea) / areaRange);
+
+    const maxBlockW = cellW * 0.95;
+    const maxBlockH = cellH * 0.95;
+
+    let bw = Math.max(cellW * 0.05, Math.min(maxBlockW, areaFrac * maxBlockW));
+    let bh = bw / Math.max(aspect, 1e-6);
+    if (bh > maxBlockH) {
+      bh = maxBlockH;
+      bw = bh * aspect;
+    }
+
+    const bx = pad + col * cellW + (cellW - bw) / 2;
+    const by = pad + row * cellH + (cellH - bh) / 2;
+
+    // Safety clamps for rendering.
     return {
-      bx: pad + relX * innerW,
-      by: pad + relY * innerH,
-      bw: Math.max(relW * innerW, 30),
-      bh: Math.max(relH * innerH, 20),
+      bx,
+      by,
+      bw: Math.max(bw, 30),
+      bh: Math.max(bh, 20),
       block,
     };
   });
@@ -116,9 +137,28 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
 
     const grid = Array.isArray(thermal.grid) ? thermal.grid : [];
     const res = grid.length;
-    const tMin = thermal.min_temp_c;
-    const tMax = thermal.max_temp_c;
-    const tRange = Math.max(tMax - tMin, 1);
+    // Use raw grid values for min/max (backend min/max are rounded to 0.1°C),
+    // otherwise we often compress the dynamic range and everything looks uniform.
+    let tMin = thermal.min_temp_c;
+    let tMax = thermal.max_temp_c;
+    if (res > 0 && Array.isArray(grid[0]) && grid[0].length > 0) {
+      let rawMin = Number.POSITIVE_INFINITY;
+      let rawMax = Number.NEGATIVE_INFINITY;
+      for (let r = 0; r < res; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          const v = grid[r][c];
+          if (typeof v !== 'number' || Number.isNaN(v)) continue;
+          if (v < rawMin) rawMin = v;
+          if (v > rawMax) rawMax = v;
+        }
+      }
+      if (Number.isFinite(rawMin) && Number.isFinite(rawMax) && rawMax > rawMin) {
+        tMin = rawMin;
+        tMax = rawMax;
+      }
+    }
+    const tRange = Math.max(tMax - tMin, 1e-6);
+    const gamma = 0.65; // boosts contrast for small deltas
 
     if (res > 0) {
       const cols = grid[0]?.length || res;
@@ -129,7 +169,8 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       for (let row = 0; row < res; row++) {
         for (let col = 0; col < (grid[row]?.length || cols); col++) {
           const t = grid[row]?.[col] ?? tMin;
-          const norm = Math.min(1, Math.max(0, (t - tMin) / tRange));
+          const normRaw = Math.min(1, Math.max(0, (t - tMin) / tRange));
+          const norm = Math.pow(normRaw, gamma);
           const [r, g, b] = tempToRGB(norm);
           ctx.fillStyle = `rgba(${r},${g},${b},0.72)`;
           ctx.fillRect(pad + col * cellW - 0.5, pad + row * cellH - 0.5, cellW + 1, cellH + 1);
@@ -149,7 +190,8 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       const zone = thermal.zones.find(z => z.block_id === block.id);
       const zoneHotColor = zone
         ? (() => {
-          const norm = Math.min(1, Math.max(0, (zone.temperature_c - tMin) / Math.max(tRange, 1e-6)));
+          const normRaw = Math.min(1, Math.max(0, (zone.temperature_c - tMin) / Math.max(tRange, 1e-6)));
+          const norm = Math.pow(normRaw, gamma);
           const [r, g, b] = tempToRGB(norm);
           return `rgb(${r},${g},${b})`;
         })()
@@ -162,6 +204,24 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
             : zoneHotColor
         : zoneHotColor;
 
+      // Semi-transparent interior tint so heat "fills" the block footprint.
+      if (zone) {
+        ctx.fillStyle =
+          zone.status === 'CRITICAL'
+            ? 'rgba(239,68,68,0.18)'
+            : zone.status === 'WARNING'
+              ? 'rgba(245,158,11,0.16)'
+              : (() => {
+                const normRaw = Math.min(1, Math.max(0, (zone.temperature_c - tMin) / Math.max(tRange, 1e-6)));
+                const norm = Math.pow(normRaw, gamma);
+                const [r, g, b] = tempToRGB(norm);
+                return `rgba(${r},${g},${b},0.12)`;
+              })();
+        ctx.beginPath();
+        ctx.roundRect?.(bx, by, bw, bh, 4);
+        ctx.fill();
+      }
+
       // Block outline
       ctx.strokeStyle = isHovered ? zoneColor : 'rgba(255,255,255,0.3)';
       ctx.lineWidth = isHovered ? 2.5 : 1;
@@ -172,7 +232,7 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       ctx.setLineDash([]);
 
       // Block name label
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
       const lblW = Math.min(bw - 4, 90);
       const lblH = 14;
       ctx.fillRect(bx + 2, by + 2, lblW, lblH);
@@ -214,7 +274,7 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       const norm = i / labelCount;
       const temp = tMin + norm * tRange;
       const y = h - pad - norm * (h - pad * 2);
-      const [r, g, b] = tempToRGB(norm);
+      const [r, g, b] = tempToRGB(Math.pow(norm, gamma));
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.font = '8px monospace';
       ctx.fillText(`${temp.toFixed(0)}°`, w - pad + 4, y + 3);

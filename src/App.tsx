@@ -76,6 +76,27 @@ function useDescriptionMic(onResult: (t: string) => void) {
 }
 
 export default function App() {
+  const retryAsync = useCallback(async <T,>(
+    fn: () => Promise<T>,
+    attempts: number = 3,
+    delayMs: number = 450,
+  ): Promise<T> => {
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        lastErr = e;
+        if (i < attempts - 1) {
+          // Small backoff for transient backend restarts.
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+        }
+      }
+    }
+    throw lastErr;
+  }, []);
+
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,7 +249,11 @@ export default function App() {
           budget_ceiling,
         })) as DesignResponse;
       } else {
-        activeDesign = (await api.applyInstruction(design.id, { instruction })) as DesignResponse;
+        activeDesign = (await retryAsync(
+          () => api.applyInstruction(design.id, { instruction }) as Promise<DesignResponse>,
+          3,
+          500,
+        )) as DesignResponse;
       }
 
       setDesign(activeDesign);
@@ -358,7 +383,7 @@ export default function App() {
       ran.push('Forecast');
     }
     return ran.length ? `Applied: ${ran.join(' + ')}` : 'Applied your requested changes.';
-  }, [bom, constraints, currentStep, design, optimization, predictions, processNode, simulation, supplyChain, domain]);
+  }, [bom, constraints, currentStep, design, optimization, predictions, processNode, simulation, supplyChain, domain, retryAsync]);
 
   // Step 1: Generate architecture
   const handleGenerate = async () => {

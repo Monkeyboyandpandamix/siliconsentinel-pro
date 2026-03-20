@@ -11,6 +11,7 @@ For the thermal grid, we solve a discretized Laplace equation with
 block power densities as source terms using iterative Jacobi relaxation.
 """
 
+import math
 import numpy as np
 from typing import Optional
 
@@ -48,11 +49,55 @@ def compute_thermal_map(
     grid = np.full((grid_resolution, grid_resolution), ambient_temp_c, dtype=np.float64)
     power_density = np.zeros((grid_resolution, grid_resolution), dtype=np.float64)
 
-    for block in blocks:
-        x = block.get("x", 0) / 100.0
-        y = block.get("y", 0) / 100.0
-        w = block.get("width", 10) / 100.0
-        h = block.get("height", 10) / 100.0
+    # Tidy, deterministic block placement for the thermal grid.
+    # Raw AI-provided x/y/width/height can be sparse or inconsistent, which
+    # produces scattered heat sources and a messy thermal visualization.
+    # Instead we place blocks onto a stable grid (by index) and size their
+    # thermal footprint by area_mm2.
+    n = len(blocks)
+    cols = max(1, math.ceil(math.sqrt(n)))
+    rows = max(1, math.ceil(n / cols))
+    cell_w = 1.0 / cols
+    cell_h = 1.0 / rows
+
+    areas = [float(b.get("area_mm2", 0.0)) for b in blocks]
+    min_area = min(areas) if areas else 0.0
+    max_area = max(areas) if areas else 1.0
+    area_range = max(max_area - min_area, 1e-9)
+
+    layout: list[tuple[float, float, float, float]] = []
+    for i, block in enumerate(blocks):
+        col = i % cols
+        row = i // cols
+
+        raw_w = float(block.get("width", 10.0))
+        raw_h = float(block.get("height", 10.0))
+        aspect = raw_w / max(raw_h, 1e-6)
+
+        area_mm2 = float(block.get("area_mm2", 0.0))
+        area_frac = 0.45 + 0.55 * ((area_mm2 - min_area) / area_range)
+
+        # Limit footprint so blocks don't cover the full cell.
+        max_block_w = cell_w * 0.95
+        max_block_h = cell_h * 0.95
+
+        w = max(cell_w * 0.05, min(max_block_w, area_frac * max_block_w))
+        h = w / max(aspect, 1e-6)
+        if h > max_block_h:
+            h = max_block_h
+            w = h * aspect
+
+        # Center within the cell.
+        x = col * cell_w + (cell_w - w) / 2.0
+        y = row * cell_h + (cell_h - h) / 2.0
+
+        # Clamp for numerical stability.
+        x = min(max(x, 0.0), 1.0 - w)
+        y = min(max(y, 0.0), 1.0 - h)
+
+        layout.append((x, y, w, h))
+
+    for block, (x, y, w, h) in zip(blocks, layout):
         power_mw = block.get("power_mw", 0)
 
         xi = int(x * grid_resolution)
@@ -94,11 +139,7 @@ def compute_thermal_map(
     grid = grid + bulk_rise * 0.5  # partial superposition
 
     zones = []
-    for block in blocks:
-        x = block.get("x", 0) / 100.0
-        y = block.get("y", 0) / 100.0
-        w = block.get("width", 10) / 100.0
-        h = block.get("height", 10) / 100.0
+    for block, (x, y, w, h) in zip(blocks, layout):
         xi = int(x * grid_resolution)
         yi = int(y * grid_resolution)
         xf = min(int((x + w) * grid_resolution), grid_resolution)
