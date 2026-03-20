@@ -624,17 +624,6 @@ export default function App() {
 
                   <BOMTable bom={bom} />
 
-                  {/* Cost Scenarios */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {bom.scenarios.map(s => (
-                      <div key={s.name} className={`bg-zinc-900/50 border rounded-xl p-4 ${s.name === 'Balanced' ? 'border-indigo-500/50' : 'border-zinc-800'}`}>
-                        <h4 className="font-bold text-sm">{s.name}</h4>
-                        <p className="text-xl font-bold mt-1">${s.total_per_unit.toFixed(2)}<span className="text-xs text-zinc-500">/unit</span></p>
-                        <p className="text-xs text-zinc-500 mt-2">{s.tradeoffs}</p>
-                      </div>
-                    ))}
-                  </div>
-
                   <StepNav
                     onBack={() => setCurrentStep(4)}
                     onNext={handleSupplyChain}

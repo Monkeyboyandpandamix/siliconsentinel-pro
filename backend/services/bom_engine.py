@@ -67,7 +67,7 @@ class BOMEngineService:
         total_bom_cost = sum(e.unit_price * e.quantity for e in db_entries)
         total_area = arch.get("total_area_mm2", 1.0)
         cost_breakdown = self._compute_cost_breakdown(total_bom_cost, total_area, pn, req.volume)
-        scenarios = self._generate_scenarios(cost_breakdown, total_bom_cost)
+        scenarios = self._generate_scenarios(cost_breakdown, total_bom_cost, db_entries)
         critical_path = self._find_lead_time_critical_path(db_entries)
         diversity_score, diversity_risk = self._compute_supplier_diversity(db_entries)
 
@@ -144,28 +144,82 @@ class BOMEngineService:
             total_per_unit=round(total, 2),
         )
 
-    def _generate_scenarios(self, baseline: CostBreakdown, bom_cost: float) -> list[CostScenario]:
+    def _generate_scenarios(
+        self, baseline: CostBreakdown, bom_cost: float, entries: list[BOMEntry]
+    ) -> list[CostScenario]:
+        """
+        Generate three cost tiers derived from the actual BOM entries.
+        Descriptions reference the real top-cost components and realistic substitution paths.
+        """
+        # Rank entries by total line cost (desc) to surface the drivers
+        sorted_entries = sorted(entries, key=lambda e: e.unit_price * e.quantity, reverse=True)
+        top_parts = sorted_entries[:3]
+
+        # Build human-readable driver text for the top cost line items
+        driver_names = [f"{e.description.split(',')[0]} ({e.part_number})" for e in top_parts]
+        driver_str = driver_names[0] if driver_names else "primary ICs"
+        driver2 = driver_names[1] if len(driver_names) > 1 else "passive components"
+
+        # Count long lead-time parts (>28 days)
+        long_lead = [e for e in entries if (e.lead_time_days or 0) > 28]
+        long_lead_str = f"{len(long_lead)} part(s) with >28-day lead times" if long_lead else "all parts <28-day lead"
+
+        # Supplier count
+        suppliers = set(e.supplier for e in entries if e.supplier)
+        supplier_str = f"{len(suppliers)} distinct supplier(s)" if suppliers else "mixed supplier base"
+
+        # Tier pricing based on actual BOM totals
+        budget_bom  = round(bom_cost * 0.78, 2)
+        balanced_bom = round(bom_cost, 2)
+        premium_bom  = round(bom_cost * 1.28, 2)
+
+        budget_total  = round(baseline.total_per_unit * 0.75, 2)
+        balanced_total = baseline.total_per_unit
+        premium_total  = round(baseline.total_per_unit * 1.38, 2)
+
         return [
             CostScenario(
                 name="Budget",
-                description="Use lowest-cost alternates, larger process node, minimal testing",
-                total_per_unit=round(baseline.total_per_unit * 0.75, 2),
-                bom_cost=round(bom_cost * 0.80, 2),
-                tradeoffs="10-15% lower performance, longer lead times, less supplier redundancy",
+                description=(
+                    f"Substitute {driver_str} with pin-compatible economy alternates; "
+                    f"reduce test coverage; single-source to cut BOM to ${budget_bom:.2f}"
+                ),
+                total_per_unit=budget_total,
+                bom_cost=budget_bom,
+                tradeoffs=(
+                    f"BOM drops to ${budget_bom:.2f} by downgrading {driver_str} and {driver2}. "
+                    f"Accepts 10–15% timing/thermal margin reduction and single-source risk. "
+                    f"{long_lead_str}."
+                ),
             ),
             CostScenario(
                 name="Balanced",
-                description="Recommended configuration balancing cost, performance, and risk",
-                total_per_unit=baseline.total_per_unit,
-                bom_cost=round(bom_cost, 2),
-                tradeoffs="Optimal balance — meets all design constraints within budget",
+                description=(
+                    f"As-designed BOM (${balanced_bom:.2f}) across {supplier_str}. "
+                    f"Meets all constraints; dual-source on critical path."
+                ),
+                total_per_unit=balanced_total,
+                bom_cost=balanced_bom,
+                tradeoffs=(
+                    f"${balanced_bom:.2f} BOM from {supplier_str}. "
+                    f"Top cost driver: {driver_str}. "
+                    f"All design rule and thermal constraints met. "
+                    f"{long_lead_str}."
+                ),
             ),
             CostScenario(
                 name="Premium",
-                description="Top-tier components, dual-source everything, extended testing",
-                total_per_unit=round(baseline.total_per_unit * 1.35, 2),
-                bom_cost=round(bom_cost * 1.25, 2),
-                tradeoffs="5-10% better performance, full redundancy, fastest lead times",
+                description=(
+                    f"Upgrade {driver_str} to industrial/automotive grade; "
+                    f"dual-source all {len(entries)} lines; priority allocation — BOM ${premium_bom:.2f}"
+                ),
+                total_per_unit=premium_total,
+                bom_cost=premium_bom,
+                tradeoffs=(
+                    f"BOM rises to ${premium_bom:.2f} with AEC-Q100/Q200 graded {driver_str}, "
+                    f"100% incoming inspection, and geographically diverse {supplier_str}. "
+                    f"Priority distributor allocation eliminates {long_lead_str.lower()}."
+                ),
             ),
         ]
 

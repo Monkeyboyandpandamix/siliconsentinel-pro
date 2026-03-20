@@ -73,14 +73,23 @@ RENEWABLE_PCT_FALLBACK: dict[str, float] = {
     "France":        24.7,   # IEA 2022 (mainly hydro/wind; nuclear is separate)
 }
 
-# Energy per wafer by process node (kWh) — TSMC/IRDS industry estimates
+# Energy per wafer by process node (kWh) — TSMC/IRDS/SEMI industry estimates
+# Sources: IRDS 2023, TSMC CSR Report 2023, Sustainalytics semiconductor study 2022
+# EUV nodes (3nm, 5nm, 7nm) are significantly higher due to multi-patterning & EUV laser power
 ENERGY_PER_WAFER_KWH: dict[str, float] = {
-    "5nm":   850,
-    "7nm":   650,
-    "14nm":  400,
-    "28nm":  250,
-    "65nm":  180,
-    "180nm": 120,
+    "3nm":   1100,  # TSMC N3: ~34 EUV masks, most energy-intensive node in production
+    "5nm":    850,  # TSMC N5: ~14 EUV + DUV multi-patterning
+    "7nm":    650,  # TSMC N7: first EUV adoption, ~5 EUV mask layers
+    "10nm":   520,  # Intel 10nm / Samsung 10LPE: DUV multi-patterning intensive
+    "14nm":   400,  # TSMC 16FF / Samsung 14LPP / Intel 14nm: mature FinFET
+    "22nm":   320,  # Intel 22nm (Ivy Bridge era) / TSMC 22ULP: planar-to-FinFET
+    "28nm":   250,  # TSMC 28HPM: high-volume mature node, well-optimized fabs
+    "40nm":   210,  # TSMC 40G/40LP: workhorse node for analog/mixed-signal
+    "65nm":   175,  # TSMC 65G: stable, low overhead, single-patterning DUV
+    "90nm":   150,  # 90nm: ageing node, less optimized energy infrastructure
+    "130nm":  130,  # 130nm: legacy CMOS, lower throughput and fab utilization
+    "180nm":  115,  # 180nm: bulk CMOS, simple process, low energy per mask step
+    "350nm":   90,  # 350nm: oldest nodes, 200mm wafers, fewest process steps
 }
 
 PACKAGING_ENERGY_KWH = 15.0
