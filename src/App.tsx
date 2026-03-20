@@ -103,13 +103,13 @@ export default function App() {
 
   // System health (live from backend)
   const [health, setHealth] = useState<Record<string, string>>({
-    backend: 'ONLINE',
+    backend: '...',
     gemini: '...',
     watson_orchestrate: '...',
     watson_tts: '...',
-    simulation_core: 'ONLINE',
-    component_catalog: 'ONLINE',
-    supply_chain_db: 'ONLINE',
+    simulation_core: '...',
+    component_catalog: '...',
+    supply_chain_db: '...',
     live_component_pricing: '...',
   });
 
@@ -118,7 +118,18 @@ export default function App() {
       fetch('/api/health/detailed')
         .then((r) => r.json())
         .then((d) => setHealth(d))
-        .catch(() => {});
+        .catch(() => {
+          setHealth({
+            backend: 'UNAVAILABLE',
+            gemini: 'UNAVAILABLE',
+            watson_orchestrate: 'UNAVAILABLE',
+            watson_tts: 'UNAVAILABLE',
+            simulation_core: 'UNAVAILABLE',
+            component_catalog: 'UNAVAILABLE',
+            supply_chain_db: 'UNAVAILABLE',
+            live_component_pricing: 'UNAVAILABLE',
+          });
+        });
     };
     fetchHealth();
     const id = setInterval(fetchHealth, 30_000);
@@ -861,11 +872,11 @@ function HealthRow({ label, status }: { label: string; status: string }) {
   const cls =
     status === 'ONLINE' || status === 'MOUSER_ONLY'
       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-      : status === 'NO KEY'
+      : status === 'NO KEY' || status === 'NO AGENT ID'
         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
         : status === '...'
           ? 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30 animate-pulse'
-          : status.startsWith('ERROR') || status === 'AUTH ERROR'
+          : status.startsWith('ERROR') || status === 'AUTH ERROR' || status === 'UNAVAILABLE'
             ? 'bg-red-500/10 text-red-400 border-red-500/20'
             : 'bg-zinc-700/20 text-zinc-500 border-zinc-700/30';
   return (

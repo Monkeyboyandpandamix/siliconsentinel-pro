@@ -86,10 +86,21 @@ async def _probe_watson_tts(settings) -> str:
 async def _probe_watson_orchestrate(settings) -> str:
     if not settings.watson_orchestrate_api_key:
         return "NO KEY"
-    if not settings.watson_orchestrate_url or not settings.watson_orchestrate_instance_id:
+    if not settings.watson_orchestrate_url:
+        return "NO KEY"
+    orch_url = settings.watson_orchestrate_url.rstrip("/")
+    wxo_saas = "watson-orchestrate." in orch_url.lower()
+    if wxo_saas:
+        if not (settings.watson_orchestrate_agent_id or "").strip():
+            return "NO AGENT ID"
+    elif not settings.watson_orchestrate_instance_id:
         return "NO KEY"
     try:
-        async with httpx.AsyncClient(timeout=8) as client:
+        async with httpx.AsyncClient(timeout=10) as client:
+            if wxo_saas:
+                alive = await client.get(f"{orch_url}/api/v1/health/alive")
+                if alive.status_code != 200:
+                    return f"ERROR {alive.status_code}"
             iam_resp = await client.post(
                 "https://iam.cloud.ibm.com/identity/token",
                 data={

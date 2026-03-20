@@ -3,10 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Any
+import asyncio
+import base64
 import httpx
 import json
 import logging
-import base64
+import time
 
 from backend.database import get_db
 from backend.config import get_settings
@@ -14,6 +16,7 @@ from backend.limiter import limiter
 from backend.models.orchestration import OrchestrationOrder
 from backend.schemas.orchestration import OrchestrationOrderResponse, PipelineStatusResponse
 from backend.services.orchestrator import OrchestratorService
+from backend.semiconductor.process_nodes import PROCESS_NODES
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -170,51 +173,261 @@ async def _get_iam_token(api_key: str) -> str:
         return resp.json()["access_token"]
 
 
+def _orch_is_wxo_saas_host(orch_url: str) -> bool:
+    """True for IBM watsonx Orchestrate SaaS (WxO Server API), not legacy Watson Assistant v2."""
+    return "watson-orchestrate." in orch_url.lower()
+
+
+def _wxo_api_base(orch_url: str) -> str:
+    return f"{orch_url.rstrip('/')}/api"
+
+
+def _text_from_wxo_content_blocks(content: list[Any]) -> str:
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("response_type") == "text":
+            for key in ("text", "message", "body", "plain_text", "value"):
+                v = block.get(key)
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+                    break
+            fd = block.get("form_data")
+            if isinstance(fd, dict):
+                for key in ("text", "message", "content", "answer"):
+                    v = fd.get(key)
+                    if isinstance(v, str) and v.strip():
+                        parts.append(v.strip())
+        for key in ("text", "message"):
+            v = block.get(key)
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+    return " ".join(parts).strip()
+
+
+def _reply_from_wxo_thread_messages(messages: list[Any]) -> str:
+    best = ""
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        role = (msg.get("role") or "").lower()
+        if role not in ("assistant", "agent", "system", "bot"):
+            continue
+        raw = msg.get("content")
+        if isinstance(raw, str) and raw.strip():
+            candidate = raw.strip()
+        elif isinstance(raw, list):
+            candidate = _text_from_wxo_content_blocks(raw)
+        else:
+            candidate = ""
+        if len(candidate) > len(best):
+            best = candidate
+    return best
+
+
+def _reply_from_wxo_run_result(result: Any) -> str:
+    if result is None:
+        return ""
+    if isinstance(result, str) and result.strip():
+        return result.strip()
+    if isinstance(result, dict):
+        for key in ("text", "message", "answer", "output", "content"):
+            v = result.get(key)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, list):
+                t = _text_from_wxo_content_blocks(v)
+                if t:
+                    return t
+    return ""
+
+
+async def _wxo_fetch_run_status(
+    client: httpx.AsyncClient,
+    base_api: str,
+    headers: dict[str, str],
+    assistant_id: str,
+    run_id: str,
+) -> tuple[dict[str, Any] | None, int]:
+    """GET run status; WxO may expose either assistants or orchestrate path."""
+    urls = [
+        f"{base_api}/v1/assistants/{assistant_id}/runs/{run_id}",
+        f"{base_api}/v1/orchestrate/runs/{run_id}",
+    ]
+    last_status = 404
+    for url in urls:
+        resp = await client.get(url, headers=headers)
+        last_status = resp.status_code
+        if resp.status_code == 404:
+            continue
+        if resp.status_code != 200:
+            return None, resp.status_code
+        data = resp.json()
+        if isinstance(data, dict):
+            return data, 200
+    return None, last_status
+
+
+async def _poll_wxo_assistant_run(
+    client: httpx.AsyncClient,
+    base_api: str,
+    headers: dict[str, str],
+    assistant_id: str,
+    run_id: str,
+    *,
+    max_wait_s: float = 90.0,
+    interval_s: float = 0.75,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + max_wait_s
+    while time.monotonic() < deadline:
+        data, http_st = await _wxo_fetch_run_status(client, base_api, headers, assistant_id, run_id)
+        if data is None:
+            if http_st not in (404,):
+                logger.warning(f"WxO get run: HTTP {http_st}")
+            await asyncio.sleep(interval_s)
+            continue
+        status = str(data.get("status") or "").lower()
+        if status in ("completed", "async_completed"):
+            return data
+        if status in ("failed", "cancelled", "expired"):
+            err = data.get("last_error") or str(data.get("result"))[:500]
+            raise ValueError(f"Watson Orchestrate run {status}: {err}")
+        await asyncio.sleep(interval_s)
+    raise ValueError("Watson Orchestrate run timed out — no completed status from assistant run")
+
+
+async def _poll_wxo_thread_for_reply(
+    client: httpx.AsyncClient,
+    base_api: str,
+    headers: dict[str, str],
+    thread_id: str,
+    *,
+    max_wait_s: float = 75.0,
+    interval_s: float = 1.0,
+) -> str:
+    deadline = time.monotonic() + max_wait_s
+    while time.monotonic() < deadline:
+        resp = await client.get(
+            f"{base_api}/v1/threads/{thread_id}/messages",
+            headers=headers,
+        )
+        if resp.status_code == 200:
+            msg_list = resp.json()
+            if isinstance(msg_list, list):
+                reply = _reply_from_wxo_thread_messages(msg_list)
+                if reply:
+                    return reply
+        await asyncio.sleep(interval_s)
+    return ""
+
+
+async def _call_wxo_server_api(
+    client: httpx.AsyncClient,
+    orch_url: str,
+    token: str,
+    agent_id: str,
+    full_message: str,
+) -> str:
+    """
+    IBM watsonx Orchestrate SaaS (WxO Server API under /api/v1/...).
+    See: https://developer.watson-orchestrate.ibm.com/
+    """
+    base_api = _wxo_api_base(orch_url)
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    body: dict[str, Any] = {"message": {"role": "user", "content": full_message}}
+
+    run_url = f"{base_api}/v1/assistants/{agent_id}/runs"
+    run_resp = await client.post(run_url, headers=headers, json=body)
+    if run_resp.status_code not in (200, 201):
+        orch = await client.post(
+            f"{base_api}/v1/orchestrate/runs",
+            headers=headers,
+            json={**body, "agent_id": agent_id},
+            params={"stream": "false"},
+        )
+        if orch.status_code not in (200, 201):
+            raise ValueError(
+                f"WxO run failed: assistants HTTP {run_resp.status_code}, "
+                f"orchestrate HTTP {orch.status_code} — {orch.text[:350]}"
+            )
+        run_resp = orch
+
+    run_data = run_resp.json() if run_resp.content else {}
+    if not isinstance(run_data, dict):
+        raise ValueError("WxO run: unexpected non-JSON response")
+
+    run_id = run_data.get("run_id") or run_data.get("id")
+    thread_id = run_data.get("thread_id")
+
+    if run_id:
+        try:
+            final = await _poll_wxo_assistant_run(client, base_api, headers, agent_id, str(run_id))
+            reply = _reply_from_wxo_run_result(final.get("result"))
+            if reply:
+                return reply
+            thread_id = final.get("thread_id") or thread_id
+        except ValueError as e:
+            logger.warning(f"WxO run polling ended without inline result: {e}")
+
+    if thread_id:
+        reply = await _poll_wxo_thread_for_reply(client, base_api, headers, str(thread_id))
+        if reply:
+            return reply
+
+    raise ValueError("WxO returned no assistant text — check agent_id and IBM Cloud IAM access to Orchestrate")
+
+
 async def _call_watson_orchestrate(message: str, context_prefix: str, history: list, settings) -> str:
     api_key = settings.watson_orchestrate_api_key
     orch_url = settings.watson_orchestrate_url.rstrip("/")
     instance_id = settings.watson_orchestrate_instance_id
-    agent_id = settings.watson_orchestrate_agent_id
+    agent_id = (settings.watson_orchestrate_agent_id or "").strip()
 
     if not api_key:
         raise ValueError("Watson Orchestrate API key not configured")
     if not orch_url:
         raise ValueError("Watson Orchestrate URL not configured")
-    if not instance_id:
+
+    wxo_saas = _orch_is_wxo_saas_host(orch_url)
+    if wxo_saas:
+        if not agent_id:
+            raise ValueError(
+                "WATSON_ORCHESTRATE_AGENT_ID is required for *.watson-orchestrate.* URLs (registered agent UUID)"
+            )
+    elif not instance_id:
         raise ValueError("Watson Orchestrate Instance ID not configured")
 
     token = await _get_iam_token(api_key)
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    full_message = f"{context_prefix}\nUser question: {message}"
 
-    # Watson Orchestrate / Watson Assistant v2 API paths
-    # The assistant_id is the agent_id for Watson Orchestrate
-    assistant_id = agent_id if agent_id else "default"
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        if wxo_saas:
+            return await _call_wxo_server_api(client, orch_url, token, agent_id, full_message)
 
-    # Try multiple URL patterns for Watson Orchestrate / Watson Assistant v2
-    # The Watson Assistant v2 API standard URL is api.{region}.assistant.watson.cloud.ibm.com
-    # Watson Orchestrate may expose the same API under its own domain
-    region = "us-south"
-    if "us-east" in orch_url:
-        region = "us-east"
-    elif "eu-de" in orch_url:
-        region = "eu-de"
-    elif "eu-gb" in orch_url:
-        region = "eu-gb"
-    elif "au-syd" in orch_url:
-        region = "au-syd"
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        assistant_id = agent_id if agent_id else "default"
 
-    base_candidates = [
-        f"https://api.{region}.assistant.watson.cloud.ibm.com/instances/{instance_id}",
-        f"{orch_url}/instances/{instance_id}",
-        orch_url,
-    ]
+        region = "us-south"
+        if "us-east" in orch_url:
+            region = "us-east"
+        elif "eu-de" in orch_url:
+            region = "eu-de"
+        elif "eu-gb" in orch_url:
+            region = "eu-gb"
+        elif "au-syd" in orch_url:
+            region = "au-syd"
 
-    session_id: str | None = None
-    working_base: str | None = None
+        base_candidates = [
+            f"https://api.{region}.assistant.watson.cloud.ibm.com/instances/{instance_id}",
+            f"{orch_url}/instances/{instance_id}",
+            orch_url,
+        ]
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        session_id: str | None = None
+        working_base: str | None = None
+
         for base in base_candidates:
-            # Watson Orchestrate uses /v2/assistants/{id}/sessions
             sess_path = f"{base}/v2/assistants/{assistant_id}/sessions"
             try:
                 sess_resp = await client.post(sess_path, headers=headers)
@@ -223,29 +436,23 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
                     if isinstance(data, dict) and "session_id" in data:
                         session_id = data["session_id"]
                         working_base = base
-                        logger.info(f"WxO session created at {sess_path}")
+                        logger.info(f"Watson Assistant v2 session created at {sess_path}")
                         break
-                    else:
-                        logger.warning(f"WxO session path {sess_path}: HTTP 200 but no session_id — body: {sess_resp.text[:200]}")
+                    logger.warning(
+                        f"Assistant v2 session {sess_path}: HTTP 200 but no session_id — body: {sess_resp.text[:200]}"
+                    )
                 else:
-                    logger.warning(f"WxO session path {sess_path}: HTTP {sess_resp.status_code} — {sess_resp.text[:200]}")
+                    logger.warning(
+                        f"Assistant v2 session {sess_path}: HTTP {sess_resp.status_code} — {sess_resp.text[:200]}"
+                    )
             except ValueError as e:
-                logger.warning(f"WxO session path {sess_path}: JSON parse error — {e}")
+                logger.warning(f"Assistant v2 session {sess_path}: JSON parse error — {e}")
             except Exception as e:
-                logger.warning(f"WxO session path {sess_path}: {e}")
+                logger.warning(f"Assistant v2 session {sess_path}: {e}")
                 continue
 
         if not session_id or not working_base:
-            raise ValueError("Could not create Watson Orchestrate session — check URL/instance/agent configuration")
-
-        # Build input with conversation history
-        full_message = f"{context_prefix}\nUser question: {message}"
-
-        # Include last few exchanges for continuity
-        conversation_turns = []
-        for h in history[-4:]:
-            if h.role == "user":
-                conversation_turns.append({"role": "user", "text": h.content})
+            raise ValueError("Could not create Watson Assistant session — check URL, instance ID, and agent ID")
 
         msg_path = f"{working_base}/v2/assistants/{assistant_id}/sessions/{session_id}/message"
         msg_payload = {
@@ -257,15 +464,16 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
         }
 
         msg_resp = await client.post(msg_path, headers=headers, json=msg_payload)
-        logger.info(f"Message response: HTTP {msg_resp.status_code}")
+        logger.info(f"Assistant v2 message response: HTTP {msg_resp.status_code}")
 
         if msg_resp.status_code != 200:
-            raise ValueError(f"Watson Orchestrate message failed: HTTP {msg_resp.status_code} — {msg_resp.text[:300]}")
+            raise ValueError(
+                f"Watson Orchestrate message failed: HTTP {msg_resp.status_code} — {msg_resp.text[:300]}"
+            )
 
         data = msg_resp.json()
         output = data.get("output", {})
 
-        # Extract text from generic responses
         texts = []
         for r in output.get("generic", []):
             if r.get("response_type") == "text" and r.get("text"):
@@ -273,7 +481,6 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
 
         reply = " ".join(texts).strip()
         if not reply:
-            # Try alternate response locations
             reply = output.get("text", "")
         if not reply:
             reply = "I processed your request but received an empty response from the agent."
@@ -288,6 +495,30 @@ def _smart_fallback_response(message: str, ctx: dict[str, Any]) -> str:
     """
     msg_lower = message.lower()
     arch = ctx.get("architecture", {})
+
+    if any(
+        w in msg_lower
+        for w in (
+            "process node",
+            "process nodes",
+            "technology node",
+            "what nodes",
+            "supported node",
+            "which nodes",
+            "pdk",
+        )
+    ):
+        nodes = sorted(
+            PROCESS_NODES.keys(),
+            key=lambda k: float(k[:-2]) if k.endswith("nm") and k[:-2].replace(".", "").isdigit() else 9999.0,
+        )
+        return (
+            "SiliconSentinel supports these process nodes for architecture, simulation, and yield models: "
+            f"{', '.join(nodes)}. "
+            "Finer nodes (smaller nm) improve density and performance but increase cost and leakage sensitivity; "
+            "mature nodes are better for cost-sensitive, analog-heavy, or high-voltage designs."
+        )
+
     sim = ctx.get("simulation", {})
     opt = ctx.get("optimization", {})
     bom_ctx = ctx.get("bom", {})
@@ -467,14 +698,25 @@ async def orchestrate_chat(request: Request, req: ChatRequest):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="Message too long — maximum 2000 characters.")
 
-    context_prefix = build_context_prefix(req.context)
+    try:
+        context_prefix = build_context_prefix(req.context)
+    except Exception as e:
+        logger.warning("Chat context build failed, continuing without prefix: %s", e)
+        context_prefix = ""
 
     try:
         reply = await _call_watson_orchestrate(req.message, context_prefix, req.history, settings)
         return ChatResponse(reply=reply, source="watson_orchestrate")
     except Exception as e:
         logger.warning(f"Watson Orchestrate unavailable, using fallback: {e}")
-        reply = _smart_fallback_response(req.message, req.context)
+        try:
+            reply = _smart_fallback_response(req.message, req.context)
+        except Exception as fb_e:
+            logger.warning(f"Fallback chat failed: {fb_e}")
+            reply = (
+                "I'm running in limited mode. Generate a design, then ask about power, thermals, "
+                "yield, BOM, timing, or supply chain — or configure IBM watsonx Orchestrate in .env."
+            )
         return ChatResponse(reply=reply, source="ai_co_pilot")
 
 
