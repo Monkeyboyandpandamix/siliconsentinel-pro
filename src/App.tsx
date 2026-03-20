@@ -1,636 +1,754 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Cpu, 
-  Zap, 
-  Layers, 
-  BarChart3, 
-  ShoppingCart, 
-  Truck, 
-  Factory, 
-  ShieldCheck, 
-  ChevronRight, 
-  ChevronLeft, 
-  Wand2,
-  Settings,
-  Activity,
-  AlertCircle,
-  Loader2,
-  Mic,
-  Send,
-  Play,
-  Pause,
-  RefreshCcw
+import {
+  Cpu, Layers, Activity, Zap, ShoppingCart, Truck,
+  Factory, ShieldCheck, ChevronRight, ChevronLeft,
+  Wand2, BarChart3, AlertCircle, Loader2, Send,
+  Eye, Upload, TrendingUp
 } from 'lucide-react';
-import { generateArchitecture, getBOM, updateArchitecture } from './services/geminiService';
-import { ChipArchitecture, BOMItem, OrchestrationOrder, AppSettings } from './types';
+import { api } from './services/api';
+import type {
+  DesignResponse, SimulationResponse, OptimizationResponse,
+  BOMResponse, SupplyChainResponse, PredictionsResponse,
+  QualityCheckResponse, AccessibilityPrefs, ArchitectureBlueprint,
+} from './types';
+
+import { AccessibilityToolbar } from './components/AccessibilityToolbar';
 import { ArchitectureViewer } from './components/ArchitectureViewer';
 import { ThermalHeatmap } from './components/ThermalHeatmap';
 import { BOMTable } from './components/BOMTable';
 import { RiskMap } from './components/RiskMap';
 import { CarbonEstimator } from './components/CarbonEstimator';
 import { OrchestrationStatus } from './components/OrchestrationStatus';
-import { SettingsPanel } from './components/SettingsPanel';
-import { AIAssistant } from './components/AIAssistant';
-import { BenchpressList } from './components/BenchpressList';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { OptimizationView } from './components/OptimizationView';
+import { YieldForecast } from './components/YieldForecast';
+import { QualityControl } from './components/QualityControl';
+import { ManufacturabilityScore } from './components/ManufacturabilityScore';
+import { SupplierCards } from './components/SupplierCards';
+import { ConstraintForm } from './components/ConstraintForm';
+import { SimulationResults } from './components/SimulationResults';
 
 const STEPS = [
-  { id: 1, title: 'Define', icon: Wand2, description: 'Describe your chip' },
-  { id: 2, title: 'Architect', icon: Layers, description: 'AI Co-Pilot Design' },
-  { id: 3, title: 'Simulate', icon: Activity, description: 'Digital Twin Analysis' },
-  { id: 4, title: 'Supply', icon: ShoppingCart, description: 'BOM & Logistics' },
+  { id: 1, title: 'Describe', icon: Wand2, description: 'Describe Your Chip' },
+  { id: 2, title: 'Architect', icon: Layers, description: 'Architecture Review' },
+  { id: 3, title: 'Simulate', icon: Activity, description: 'Digital Twin' },
+  { id: 4, title: 'Optimize', icon: TrendingUp, description: 'AI Optimization' },
+  { id: 5, title: 'BOM', icon: ShoppingCart, description: 'BOM & Cost' },
+  { id: 6, title: 'Supply', icon: Truck, description: 'Supply Chain' },
+  { id: 7, title: 'Forecast', icon: BarChart3, description: 'Mfg Forecast' },
+  { id: 8, title: 'Quality', icon: ShieldCheck, description: 'QC & Feedback' },
 ];
+
+const PROCESS_NODES = ['5nm', '7nm', '14nm', '28nm', '65nm', '180nm'];
+const DOMAINS = ['IoT', 'Automotive', 'Consumer', 'Industrial', 'Wearable', 'Data Center'];
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
-  const [prompt, setPrompt] = useState('');
-  const [constraints, setConstraints] = useState({
-    power: 500,
-    area: 10,
-    node: '28nm',
-    domain: 'IoT'
-  });
   const [loading, setLoading] = useState(false);
-  const [architecture, setArchitecture] = useState<ChipArchitecture | null>(null);
-  const [bom, setBom] = useState<BOMItem[]>([]);
-  const [orders, setOrders] = useState<OrchestrationOrder[]>([]);
-  const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({
-    simulatorMode: false,
-    highContrast: false,
-    uiScale: 1.0,
-    complexity: 'beginner'
+  const [error, setError] = useState<string | null>(null);
+
+  // Step 1 inputs
+  const [prompt, setPrompt] = useState('');
+  const [processNode, setProcessNode] = useState('28nm');
+  const [domain, setDomain] = useState('IoT');
+  const [constraints, setConstraints] = useState({
+    max_power_mw: '',
+    max_area_mm2: '',
+    max_temp_c: '85',
+    budget_per_unit: '',
+    target_volume: '10000',
   });
-  const [aiCommand, setAiCommand] = useState('');
-  const [isListening, setIsListening] = useState(false);
-  const [simulating, setSimulating] = useState(false);
 
-  const createOrchestrationOrder = async (type: string, payload: any) => {
-    try {
-      const res = await fetch('/api/orchestration/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, payload })
-      });
-      const order = await res.json();
-      setOrders(prev => [order, ...prev]);
-    } catch (e) {
-      console.error("Orchestration error", e);
-    }
-  };
+  // Data from backend
+  const [design, setDesign] = useState<DesignResponse | null>(null);
+  const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
+  const [optimization, setOptimization] = useState<OptimizationResponse | null>(null);
+  const [bom, setBom] = useState<BOMResponse | null>(null);
+  const [supplyChain, setSupplyChain] = useState<SupplyChainResponse | null>(null);
+  const [predictions, setPredictions] = useState<PredictionsResponse | null>(null);
+  const [qualityCheck, setQualityCheck] = useState<QualityCheckResponse | null>(null);
 
+  // Accessibility
+  const [a11y, setA11y] = useState<AccessibilityPrefs>({
+    color_mode: 'default',
+    tts_enabled: false,
+    tts_speed: 1.0,
+    tts_voice: 'female',
+    font_size: 'standard',
+    motion_reduced: false,
+  });
+
+  const fontScale = { standard: 1, large: 1.15, extra_large: 1.3 }[a11y.font_size] || 1;
+
+  const handleError = useCallback((e: unknown) => {
+    const msg = e instanceof Error ? e.message : 'An unexpected error occurred';
+    setError(msg);
+    setTimeout(() => setError(null), 8000);
+  }, []);
+
+  // Step 1: Generate architecture
   const handleGenerate = async () => {
+    if (!prompt.trim()) return;
     setLoading(true);
+    setError(null);
     try {
-      await createOrchestrationOrder("Design Generation", { prompt, constraints });
-      const arch = await generateArchitecture(prompt, constraints);
-      setArchitecture(arch);
+      const constraintData: Record<string, unknown> = {};
+      if (constraints.max_power_mw) constraintData.max_power_mw = parseFloat(constraints.max_power_mw);
+      if (constraints.max_area_mm2) constraintData.max_area_mm2 = parseFloat(constraints.max_area_mm2);
+      if (constraints.max_temp_c) constraintData.max_temp_c = parseFloat(constraints.max_temp_c);
+      if (constraints.budget_per_unit) constraintData.budget_per_unit = parseFloat(constraints.budget_per_unit);
+      if (constraints.target_volume) constraintData.target_volume = parseInt(constraints.target_volume);
+      constraintData.process_node = processNode;
+      constraintData.application_domain = domain;
+
+      const result = await api.createDesign({
+        nl_input: prompt,
+        constraints: constraintData,
+        process_node: processNode,
+        target_domain: domain,
+        budget_ceiling: constraints.budget_per_unit ? parseFloat(constraints.budget_per_unit) : undefined,
+      }) as DesignResponse;
+      setDesign(result);
       setCurrentStep(2);
     } catch (e) {
-      console.error(e);
+      handleError(e);
     } finally {
       setLoading(false);
     }
   };
 
+  // Step 2 -> 3: Simulate
   const handleSimulate = async () => {
-    if (!architecture) return;
-    setLoading(true);
-    await createOrchestrationOrder("Digital Twin Simulation", { architecture });
-    
-    // Ensure benchmarks exist for the Benchpress list
-    if (!architecture.benchmarks || architecture.benchmarks.length === 0) {
-      const mockBenchmarks = [
-        { name: 'Compute Density', score: 92, unit: 'GFLOPS/mm²', status: 'OPTIMAL' as const },
-        { name: 'Thermal Efficiency', score: 78, unit: '%', status: 'WARNING' as const },
-        { name: 'Signal Integrity', score: 94, unit: 'dB', status: 'OPTIMAL' as const },
-        { name: 'IO Bandwidth', score: 12.4, unit: 'Gbps', status: 'OPTIMAL' as const },
-        { name: 'Power Leakage', score: 1.2, unit: 'mW', status: 'CRITICAL' as const }
-      ];
-      setArchitecture({ ...architecture, benchmarks: mockBenchmarks });
-    }
-
-    setTimeout(() => {
-      setLoading(false);
-      setCurrentStep(3);
-    }, 1500);
-  };
-
-  const handleBOM = async () => {
-    if (!architecture) return;
+    if (!design) return;
     setLoading(true);
     try {
-      await createOrchestrationOrder("Procurement Orchestration", { architecture });
-      const bomData = await getBOM(architecture);
-      setBom(bomData);
+      const result = await api.runSimulation(design.id, {
+        ambient_temp_c: 25,
+        workload_profile: 'typical',
+      }) as SimulationResponse;
+      setSimulation(result);
+      setCurrentStep(3);
+    } catch (e) {
+      handleError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step 3 -> 4: Optimize
+  const handleOptimize = async () => {
+    if (!design) return;
+    setLoading(true);
+    try {
+      const result = await api.optimizeDesign(design.id, { focus: 'balanced' }) as OptimizationResponse;
+      setOptimization(result);
+      if (result.optimized_architecture) {
+        setDesign(prev => prev ? { ...prev, architecture: result.optimized_architecture as ArchitectureBlueprint } : prev);
+      }
       setCurrentStep(4);
     } catch (e) {
-      console.error(e);
+      handleError(e);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpdateArchitecture = async (command: string) => {
-    if (!architecture) return;
+  // Step 4 -> 5: BOM
+  const handleBOM = async () => {
+    if (!design) return;
     setLoading(true);
     try {
-      const updated = await updateArchitecture(architecture, command);
-      setArchitecture(updated);
-      setAiCommand('');
+      const vol = parseInt(constraints.target_volume || '10000');
+      const result = await api.generateBOM(design.id, { volume: vol }) as BOMResponse;
+      setBom(result);
+      setCurrentStep(5);
     } catch (e) {
-      console.error(e);
+      handleError(e);
     } finally {
       setLoading(false);
     }
   };
 
-  const toggleVoice = () => {
-    setIsListening(!isListening);
-    if (!isListening) {
-      // Mock voice recognition start
-      setTimeout(() => {
-        setIsListening(false);
-        setAiCommand("Reduce power consumption in the RF block");
-      }, 2000);
+  // Step 5 -> 6: Supply Chain
+  const handleSupplyChain = async () => {
+    if (!design) return;
+    setLoading(true);
+    try {
+      const result = await api.getSupplyChain(design.id) as SupplyChainResponse;
+      setSupplyChain(result);
+      setCurrentStep(6);
+    } catch (e) {
+      handleError(e);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const powerData = architecture?.blocks.map(b => ({
-    name: b.name,
-    value: b.powerConsumption
-  })) || [];
+  // Step 6 -> 7: Predictions
+  const handlePredictions = async () => {
+    if (!design) return;
+    setLoading(true);
+    try {
+      const result = await api.getPredictions(design.id) as PredictionsResponse;
+      setPredictions(result);
+      setCurrentStep(7);
+    } catch (e) {
+      handleError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#6366f1', '#ec4899'];
+  // Step 7 -> 8: (just navigate, QC is optional upload)
+  const handleQCStep = () => {
+    setCurrentStep(8);
+  };
+
+  const handleQCUpload = async (file: File) => {
+    if (!design) return;
+    setLoading(true);
+    try {
+      const result = await api.runQualityCheck(design.id, file) as QualityCheckResponse;
+      setQualityCheck(result);
+    } catch (e) {
+      handleError(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewDesign = () => {
+    setCurrentStep(1);
+    setDesign(null);
+    setSimulation(null);
+    setOptimization(null);
+    setBom(null);
+    setSupplyChain(null);
+    setPredictions(null);
+    setQualityCheck(null);
+    setPrompt('');
+    setError(null);
+  };
+
+  const arch = design?.architecture;
 
   return (
-    <div 
-      className={`min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-500 ${settings.highContrast ? 'contrast-125' : ''}`}
-      style={{ fontSize: `${settings.uiScale * 100}%` }}
+    <div
+      className={`min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-300 ${a11y.color_mode === 'high_contrast' ? 'contrast-150' : ''} ${a11y.color_mode === 'grayscale' ? 'grayscale' : ''}`}
+      style={{ fontSize: `${fontScale * 100}%` }}
     >
-      {/* AI Assistant (Open API Replacement) */}
-      <AIAssistant />
-
-      {/* Settings Panel */}
-      {showSettings && (
-        <SettingsPanel 
-          settings={settings} 
-          onUpdate={setSettings} 
-          onClose={() => setShowSettings(false)} 
-          simulating={simulating}
-          setSimulating={setSimulating}
-          currentStep={currentStep}
-        />
-      )}
-
-      {/* Simulator Mode Overlay */}
-      {settings.simulatorMode && simulating && (
-        <div className="fixed top-24 right-8 w-80 bg-zinc-950/90 border border-indigo-500/30 backdrop-blur-xl rounded-3xl p-6 shadow-2xl shadow-indigo-500/10 z-[60] animate-in fade-in slide-in-from-right-8 duration-500">
-            <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></div>
-                    <h3 className="text-xs font-mono uppercase tracking-widest text-indigo-400">Live Simulator</h3>
-                </div>
-                <button onClick={() => setSimulating(false)} className="text-zinc-500 hover:text-white transition-colors">
-                    <RefreshCcw size={16} />
-                </button>
-            </div>
-
-            <div className="space-y-6">
-                <div>
-                    <div className="flex justify-between text-[10px] text-zinc-500 font-mono uppercase mb-2">
-                        <span>Signal Integrity</span>
-                        <span className="text-indigo-400">94.2%</span>
-                    </div>
-                    <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500 w-[94.2%]"></div>
-                    </div>
-                </div>
-
-                <div>
-                    <div className="flex justify-between text-[10px] text-zinc-500 font-mono uppercase mb-2">
-                        <span>Thermal Load</span>
-                        <span className="text-amber-400">42°C</span>
-                    </div>
-                    <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-amber-500 w-[42%]"></div>
-                    </div>
-                </div>
-
-                <div className="pt-4 border-t border-zinc-800/50">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Clock Freq</p>
-                            <p className="text-lg font-bold">3.2 <span className="text-[10px] text-zinc-600">GHz</span></p>
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Voltage</p>
-                            <p className="text-lg font-bold">0.85 <span className="text-[10px] text-zinc-600">V</span></p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="flex gap-2 pt-2">
-                    <button className="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all">Pause</button>
-                    <button className="flex-1 py-2 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all">Reset</button>
-                </div>
-            </div>
-        </div>
-      )}
+      {/* Accessibility Toolbar */}
+      <AccessibilityToolbar prefs={a11y} onChange={setA11y} />
 
       {/* Header */}
-      <header className="border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+      <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
-              <Cpu className="text-white" size={20} />
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center" aria-hidden="true">
+              <Cpu className="text-white" size={18} />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight">SiliconSentinel <span className="text-indigo-500">Pro</span></h1>
-              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Semiconductor Lifecycle Platform</p>
+              <h1 className="text-base font-bold tracking-tight">SiliconSentinel <span className="text-indigo-400">Pro</span></h1>
+              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Semiconductor Lifecycle Platform v2</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-             <div className="px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 flex items-center gap-2">
-                <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
-                <span className="text-[10px] font-mono text-zinc-400 uppercase">Open API Connected</span>
-             </div>
-             <Settings 
-               size={18} 
-               className="text-zinc-500 cursor-pointer hover:text-white transition-colors" 
-               onClick={() => setShowSettings(true)}
-             />
+          <div className="flex items-center gap-3 text-xs text-zinc-500">
+            {design && (
+              <span className="px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 font-mono">
+                Design #{design.id} — {design.status}
+              </span>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Column: Wizard & Content */}
-        <div className="lg:col-span-8 space-y-8">
-          
-          {/* Progress Bar */}
-          <div className="flex justify-between items-center bg-zinc-900/30 p-4 rounded-2xl border border-zinc-800/50">
+      {/* Error Banner */}
+      {error && (
+        <div className="bg-red-900/30 border-b border-red-500/30 px-6 py-3 text-sm text-red-300 flex items-center gap-2" role="alert">
+          <AlertCircle size={16} /> {error}
+        </div>
+      )}
+
+      <main className="max-w-7xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        {/* Left: Wizard + Content */}
+        <div className="lg:col-span-9 space-y-6">
+
+          {/* Progress Stepper */}
+          <nav className="flex items-center gap-1 bg-zinc-900/40 p-2 rounded-xl border border-zinc-800/50 overflow-x-auto" aria-label="Design pipeline steps">
             {STEPS.map((step, idx) => (
-              <div key={step.id} className="flex items-center gap-3 relative">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-500 ${
-                  currentStep >= step.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-zinc-800 text-zinc-500'
-                }`}>
-                  <step.icon size={20} />
-                </div>
-                <div className="hidden md:block">
-                  <p className={`text-xs font-bold ${currentStep >= step.id ? 'text-white' : 'text-zinc-500'}`}>{step.title}</p>
-                  <p className="text-[10px] text-zinc-600 font-mono">{step.description}</p>
-                </div>
+              <React.Fragment key={step.id}>
+                <button
+                  onClick={() => {
+                    if (step.id <= currentStep) setCurrentStep(step.id);
+                  }}
+                  disabled={step.id > currentStep}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                    currentStep === step.id
+                      ? 'bg-indigo-600 text-white'
+                      : currentStep > step.id
+                        ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700 cursor-pointer'
+                        : 'text-zinc-600 cursor-not-allowed'
+                  }`}
+                  aria-current={currentStep === step.id ? 'step' : undefined}
+                  aria-label={`Step ${step.id}: ${step.description}`}
+                >
+                  <step.icon size={14} />
+                  <span className="hidden md:inline">{step.title}</span>
+                </button>
                 {idx < STEPS.length - 1 && (
-                  <div className="hidden md:block w-8 h-[1px] bg-zinc-800 mx-2"></div>
+                  <ChevronRight size={12} className="text-zinc-700 flex-shrink-0" />
                 )}
-              </div>
+              </React.Fragment>
             ))}
-          </div>
+          </nav>
 
           {/* Step Content */}
           <AnimatePresence mode="wait">
             <motion.div
               key={currentStep}
-              initial={{ opacity: 0, y: 20 }}
+              initial={a11y.motion_reduced ? {} : { opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.4 }}
-              className="min-h-[500px]"
+              exit={a11y.motion_reduced ? {} : { opacity: 0, y: -12 }}
+              transition={{ duration: a11y.motion_reduced ? 0 : 0.25 }}
+              className="min-h-[450px]"
             >
+
+              {/* STEP 1: Describe Your Chip */}
               {currentStep === 1 && (
-                <div className="space-y-6">
-                  <div className="bg-zinc-900/50 border border-zinc-800 p-8 rounded-3xl space-y-6">
-                    <h2 className="text-2xl font-bold">Describe Your Semiconductor Need</h2>
-                    <p className="text-zinc-400 text-sm">Our AI Co-Pilot uses watsonx.ai to transform your natural language requirements into a full architecture blueprint.</p>
-                    
-                    <textarea 
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      placeholder="e.g., I need a low-power BLE chip for a wearable heart rate monitor with integrated power management..."
-                      className="w-full h-40 bg-zinc-950 border border-zinc-800 rounded-2xl p-4 text-zinc-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none resize-none"
-                    />
+                <div className="space-y-5">
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl space-y-5">
+                    <div>
+                      <h2 className="text-xl font-bold">Describe Your Chip</h2>
+                      <p className="text-zinc-400 text-sm mt-1">Provide a natural language description and design constraints. The AI Co-Pilot will generate a complete architecture.</p>
+                    </div>
+
+                    <div>
+                      <label htmlFor="nl-input" className="block text-xs uppercase font-mono text-zinc-500 mb-1">Chip Description</label>
+                      <textarea
+                        id="nl-input"
+                        value={prompt}
+                        onChange={(e) => setPrompt(e.target.value)}
+                        placeholder="e.g., I need a low-power BLE chip for a wearable heart rate monitor with integrated power management and 64KB SRAM..."
+                        className="w-full h-32 bg-zinc-950 border border-zinc-800 rounded-xl p-4 text-zinc-200 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all outline-none resize-none text-sm"
+                        aria-required="true"
+                      />
+                    </div>
 
                     <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] uppercase font-mono text-zinc-500">Target Node</label>
-                        <select 
-                          value={constraints.node}
-                          onChange={(e) => setConstraints({...constraints, node: e.target.value})}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm outline-none"
-                        >
-                          <option>28nm</option>
-                          <option>14nm</option>
-                          <option>7nm</option>
-                          <option>5nm</option>
+                      <div>
+                        <label htmlFor="process-node" className="block text-xs uppercase font-mono text-zinc-500 mb-1">Process Node</label>
+                        <select id="process-node" value={processNode} onChange={(e) => setProcessNode(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm outline-none">
+                          {PROCESS_NODES.map(n => <option key={n} value={n}>{n}</option>)}
                         </select>
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] uppercase font-mono text-zinc-500">Application Domain</label>
-                        <select 
-                          value={constraints.domain}
-                          onChange={(e) => setConstraints({...constraints, domain: e.target.value})}
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm outline-none"
-                        >
-                          <option>IoT</option>
-                          <option>Automotive</option>
-                          <option>Consumer</option>
-                          <option>Industrial</option>
+                      <div>
+                        <label htmlFor="domain" className="block text-xs uppercase font-mono text-zinc-500 mb-1">Application Domain</label>
+                        <select id="domain" value={domain} onChange={(e) => setDomain(e.target.value)}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm outline-none">
+                          {DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
                         </select>
                       </div>
                     </div>
 
-                    <button 
+                    <ConstraintForm constraints={constraints} onChange={setConstraints} />
+
+                    <button
                       onClick={handleGenerate}
-                      disabled={!prompt || loading}
-                      className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-xl shadow-indigo-500/20"
+                      disabled={!prompt.trim() || loading}
+                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-bold flex items-center justify-center gap-2 transition-all text-sm"
+                      aria-label="Generate chip architecture"
                     >
-                      {loading ? <Loader2 className="animate-spin" /> : <Wand2 size={20} />}
+                      {loading ? <Loader2 className="animate-spin" size={18} /> : <Wand2 size={18} />}
                       Generate Architecture
                     </button>
                   </div>
                 </div>
               )}
 
-              {currentStep === 2 && architecture && (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-end">
+              {/* STEP 2: Architecture Review */}
+              {currentStep === 2 && arch && (
+                <div className="space-y-5">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <h2 className="text-2xl font-bold">{architecture.name}</h2>
-                      <p className="text-zinc-400 text-sm">Architecture Blueprint Generated via AI Co-Pilot</p>
+                      <h2 className="text-xl font-bold">{arch.name}</h2>
+                      <p className="text-zinc-400 text-sm">Architecture generated by AI Co-Pilot — {arch.process_node}</p>
                     </div>
-                    <div className="flex items-center gap-6">
-                        {settings.simulatorMode && (
-                          <button 
-                            onClick={() => setSimulating(!simulating)}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${simulating ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
-                          >
-                            {simulating ? <Pause size={14} /> : <Play size={14} />}
-                            {simulating ? 'Live Sim Active' : 'Start Live Sim'}
-                          </button>
-                        )}
-                        <div className="flex gap-4">
-                            <div className="text-right">
-                                <p className="text-[10px] text-zinc-500 font-mono uppercase">Process Node</p>
-                                <p className="text-sm font-bold text-indigo-400">{architecture.processNode}</p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-[10px] text-zinc-500 font-mono uppercase">Est. Yield</p>
-                                <p className="text-sm font-bold text-emerald-400">{architecture.estimatedYield}%</p>
-                            </div>
-                        </div>
+                    <div className="flex gap-4 text-right">
+                      <div>
+                        <p className="text-[10px] text-zinc-500 font-mono uppercase">Process Node</p>
+                        <p className="text-sm font-bold text-indigo-400">{arch.process_node}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-zinc-500 font-mono uppercase">Metal Layers</p>
+                        <p className="text-sm font-bold text-zinc-300">{arch.metal_layers}</p>
+                      </div>
                     </div>
                   </div>
 
-                  <ArchitectureViewer 
-                    architecture={architecture} 
-                    complexity={settings.complexity} 
-                    onUpdate={(updated) => setArchitecture(updated)}
+                  <ArchitectureViewer architecture={arch} />
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <Stat label="Total Power" value={`${arch.total_power_mw.toFixed(1)} mW`} />
+                    <Stat label="Die Area" value={`${arch.total_area_mm2.toFixed(2)} mm²`} />
+                    <Stat label="Blocks" value={String(arch.blocks.length)} />
+                    <Stat label="Interconnect" value={arch.interconnect.split(' ')[0]} />
+                  </div>
+
+                  {design?.materials && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+                      <h3 className="text-xs uppercase font-mono text-zinc-400 mb-2">Material Stack</h3>
+                      <div className="grid grid-cols-3 gap-3 text-xs">
+                        <div><span className="text-zinc-500">Substrate:</span> <span className="text-zinc-200">{design.materials.substrate}</span></div>
+                        <div><span className="text-zinc-500">Gate Oxide:</span> <span className="text-zinc-200">{design.materials.gate_oxide}</span></div>
+                        <div><span className="text-zinc-500">Passivation:</span> <span className="text-zinc-200">{design.materials.passivation}</span></div>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-2">{design.materials.justification}</p>
+                    </div>
+                  )}
+
+                  {design?.constraint_satisfaction && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+                      <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Constraint Satisfaction</h3>
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                        {Object.entries(design.constraint_satisfaction).map(([key, val]) => {
+                        const numVal = val as number;
+                        return (
+                          <div key={key} className="text-center">
+                            <div className={`text-lg font-bold ${numVal >= 80 ? 'text-emerald-400' : numVal >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                              {numVal.toFixed(0)}
+                            </div>
+                            <div className="text-[10px] text-zinc-500 uppercase font-mono">{key}</div>
+                          </div>
+                        );
+                      })}
+                      </div>
+                    </div>
+                  )}
+
+                  <StepNav
+                    onBack={() => setCurrentStep(1)}
+                    onNext={handleSimulate}
+                    nextLabel="Run Digital Twin Simulation"
+                    nextIcon={<Activity size={16} />}
+                    loading={loading}
                   />
-
-                  {/* AI Co-Pilot Chat/Voice */}
-                  <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl space-y-4">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-8 h-8 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                            <Cpu className="text-indigo-400" size={16} />
-                        </div>
-                        <div>
-                            <h3 className="font-bold text-sm">AI Architecture Co-Pilot</h3>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Voice & Visual Assisted Editing</p>
-                        </div>
-                    </div>
-                    
-                    <div className="flex gap-2">
-                        <div className="flex-1 relative">
-                            <input 
-                                type="text" 
-                                value={aiCommand}
-                                onChange={(e) => setAiCommand(e.target.value)}
-                                placeholder="Command AI (e.g., 'Add a second CPU core', 'Move GPU to the left')"
-                                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-                                onKeyDown={(e) => e.key === 'Enter' && handleUpdateArchitecture(aiCommand)}
-                            />
-                            <button 
-                                onClick={toggleVoice}
-                                className={`absolute right-2 top-1.5 p-2 rounded-lg transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-zinc-800 text-zinc-400 hover:text-white'}`}
-                            >
-                                <Mic size={18} />
-                            </button>
-                        </div>
-                        <button 
-                            onClick={() => handleUpdateArchitecture(aiCommand)}
-                            disabled={loading || !aiCommand.trim()}
-                            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed px-6 rounded-xl font-bold transition-all flex items-center gap-2"
-                        >
-                            {loading ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-                            <span>Update</span>
-                        </button>
-                    </div>
-                    
-                    <div className="flex gap-4 text-[10px] text-zinc-500 font-mono">
-                        <span className="flex items-center gap-1"><div className="w-1 h-1 rounded-full bg-emerald-500"></div> Voice Active</span>
-                        <span className="flex items-center gap-1"><div className="w-1 h-1 rounded-full bg-indigo-500"></div> Visual Drag Enabled</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl">
-                        <p className="text-[10px] text-zinc-500 font-mono uppercase mb-1">Total Power</p>
-                        <p className="text-xl font-bold">{architecture.totalPower} <span className="text-xs text-zinc-500">mW</span></p>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl">
-                        <p className="text-[10px] text-zinc-500 font-mono uppercase mb-1">Total Area</p>
-                        <p className="text-xl font-bold">{architecture.totalArea} <span className="text-xs text-zinc-500">mm²</span></p>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl">
-                        <p className="text-[10px] text-zinc-500 font-mono uppercase mb-1">Block Count</p>
-                        <p className="text-xl font-bold">{architecture.blocks.length}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <button onClick={() => setCurrentStep(1)} className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 rounded-2xl font-bold transition-all">Back</button>
-                    <button onClick={handleSimulate} className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all">
-                      {loading ? <Loader2 className="animate-spin" /> : <Activity size={20} />}
-                      Run Digital Twin Simulation
-                    </button>
-                  </div>
                 </div>
               )}
 
-              {currentStep === 3 && architecture && (
-                <div className="space-y-6">
-                   <div className="flex justify-between items-end">
+              {/* STEP 3: Simulate & Visualize */}
+              {currentStep === 3 && simulation && arch && (
+                <div className="space-y-5">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <h2 className="text-2xl font-bold">Simulation Results</h2>
-                      <p className="text-zinc-400 text-sm">Thermal & Power Analysis of {architecture.name}</p>
+                      <h2 className="text-xl font-bold">Simulation Results</h2>
+                      <p className="text-zinc-400 text-sm">Digital twin analysis — thermal, signal, power, timing</p>
                     </div>
-                    <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg flex items-center gap-2">
-                        <ShieldCheck className="text-emerald-500" size={16} />
-                        <span className="text-xs font-bold text-emerald-500">SIMULATION PASSED</span>
-                    </div>
+                    <PassFailBadge status={simulation.pass_fail} score={simulation.overall_score} />
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <ThermalHeatmap architecture={architecture} />
-                    <BenchpressList architecture={architecture} />
-                  </div>
+                  <SimulationResults simulation={simulation} />
+                  <ThermalHeatmap thermal={simulation.thermal} blocks={arch.blocks} />
 
-                  <div className="flex gap-4">
-                    <button onClick={() => setCurrentStep(2)} className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 rounded-2xl font-bold transition-all">Back</button>
-                    <button onClick={handleBOM} className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-500 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all">
-                      {loading ? <Loader2 className="animate-spin" /> : <ShoppingCart size={20} />}
-                      Generate BOM & Supply Plan
-                    </button>
-                  </div>
+                  {simulation.bottlenecks.length > 0 && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+                      <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Bottlenecks Identified</h3>
+                      <div className="space-y-2">
+                        {simulation.bottlenecks.map((b, i) => (
+                          <div key={i} className="flex items-start gap-3 text-sm">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${b.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                              {b.severity}
+                            </span>
+                            <div>
+                              <span className="text-zinc-300 font-medium">{b.category}:</span>{' '}
+                              <span className="text-zinc-400">{b.detail}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <StepNav
+                    onBack={() => setCurrentStep(2)}
+                    onNext={handleOptimize}
+                    nextLabel="Optimize Design"
+                    nextIcon={<TrendingUp size={16} />}
+                    loading={loading}
+                  />
                 </div>
               )}
 
-              {currentStep === 4 && bom.length > 0 && (
-                <div className="space-y-6">
-                  <div className="flex justify-between items-end">
+              {/* STEP 4: Optimize Design */}
+              {currentStep === 4 && optimization && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-bold">Optimization Results</h2>
+                    <p className="text-zinc-400 text-sm">
+                      Iteration #{optimization.iteration} — {optimization.improvement_pct >= 0 ? '+' : ''}{optimization.improvement_pct.toFixed(1)}% overall improvement
+                    </p>
+                  </div>
+
+                  <OptimizationView optimization={optimization} />
+
+                  <StepNav
+                    onBack={() => setCurrentStep(3)}
+                    onNext={handleBOM}
+                    nextLabel="Generate BOM & Cost Analysis"
+                    nextIcon={<ShoppingCart size={16} />}
+                    loading={loading}
+                  />
+                </div>
+              )}
+
+              {/* STEP 5: BOM & Cost */}
+              {currentStep === 5 && bom && (
+                <div className="space-y-5">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <h2 className="text-2xl font-bold">Supply Chain Intelligence</h2>
-                      <p className="text-zinc-400 text-sm">BOM & Manufacturing Plan for {architecture?.name}</p>
+                      <h2 className="text-xl font-bold">Bill of Materials & Cost Analysis</h2>
+                      <p className="text-zinc-400 text-sm">{bom.entries.length} components — ${bom.cost_breakdown.total_per_unit.toFixed(2)}/unit</p>
                     </div>
-                    <div className="flex gap-2">
-                        <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">Export CSV</button>
-                        <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold transition-all">Place Order</button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex items-center gap-4">
-                        <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-                            <Truck className="text-emerald-500" size={20} />
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Avg Lead Time</p>
-                            <p className="text-lg font-bold">2.4 Weeks</p>
-                        </div>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex items-center gap-4">
-                        <div className="w-10 h-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
-                            <AlertCircle className="text-amber-500" size={20} />
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Risk Score</p>
-                            <p className="text-lg font-bold">Low</p>
-                        </div>
-                    </div>
-                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center">
-                            <Factory className="text-indigo-500" size={20} />
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-zinc-500 font-mono uppercase">Fab Ready</p>
-                            <p className="text-lg font-bold">TSMC / 28nm</p>
-                        </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-zinc-500 font-mono uppercase">Supplier Diversity</p>
+                      <p className={`text-sm font-bold ${bom.supplier_diversity_risk === 'LOW' ? 'text-emerald-400' : bom.supplier_diversity_risk === 'MEDIUM' ? 'text-amber-400' : 'text-red-400'}`}>
+                        {bom.supplier_diversity_score.toFixed(0)}% — {bom.supplier_diversity_risk} Risk
+                      </p>
                     </div>
                   </div>
 
-                  <BOMTable items={bom} />
+                  <BOMTable bom={bom} />
 
-                  <div className="space-y-4">
-                    <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest">Geopolitical Risk & Supplier Concentration</h3>
-                    <RiskMap />
+                  {/* Cost Scenarios */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {bom.scenarios.map(s => (
+                      <div key={s.name} className={`bg-zinc-900/50 border rounded-xl p-4 ${s.name === 'Balanced' ? 'border-indigo-500/50' : 'border-zinc-800'}`}>
+                        <h4 className="font-bold text-sm">{s.name}</h4>
+                        <p className="text-xl font-bold mt-1">${s.total_per_unit.toFixed(2)}<span className="text-xs text-zinc-500">/unit</span></p>
+                        <p className="text-xs text-zinc-500 mt-2">{s.tradeoffs}</p>
+                      </div>
+                    ))}
                   </div>
 
-                  <CarbonEstimator 
-                    dieArea={architecture?.totalArea || 10} 
-                    volume={10000} 
+                  <StepNav
+                    onBack={() => setCurrentStep(4)}
+                    onNext={handleSupplyChain}
+                    nextLabel="Analyze Supply Chain"
+                    nextIcon={<Truck size={16} />}
+                    loading={loading}
+                  />
+                </div>
+              )}
+
+              {/* STEP 6: Supply Chain */}
+              {currentStep === 6 && supplyChain && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-bold">Supply Chain Intelligence</h2>
+                    <p className="text-zinc-400 text-sm">Fab matching, supplier risk, geopolitical analysis</p>
+                  </div>
+
+                  <SupplierCards fabs={supplyChain.fab_recommendations} />
+
+                  <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+                    <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Diversification Plan</h3>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-[10px] text-zinc-500 uppercase">Primary Fab</p>
+                        <p className="text-sm font-bold">{supplyChain.diversification_plan.primary_fab}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-zinc-500 uppercase">Secondary Fab</p>
+                        <p className="text-sm font-bold">{supplyChain.diversification_plan.secondary_fab}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-zinc-500 mt-2">{supplyChain.diversification_plan.rationale}</p>
+                  </div>
+
+                  {supplyChain.geopolitical_risks.length > 0 && (
+                    <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+                      <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Geopolitical Risk Assessment</h3>
+                      <div className="space-y-3">
+                        {supplyChain.geopolitical_risks.map((r, i) => (
+                          <div key={i} className="flex items-start gap-3">
+                            <RiskBadge level={r.risk_level} />
+                            <div className="text-sm">
+                              <span className="font-medium text-zinc-200">{r.region}</span>
+                              <ul className="text-zinc-500 text-xs mt-1 list-disc list-inside">
+                                {r.factors.map((f, fi) => <li key={fi}>{f}</li>)}
+                              </ul>
+                              <p className="text-xs text-indigo-400 mt-1">{r.mitigation}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <StepNav
+                    onBack={() => setCurrentStep(5)}
+                    onNext={handlePredictions}
+                    nextLabel="Manufacturing Forecast"
+                    nextIcon={<BarChart3 size={16} />}
+                    loading={loading}
+                  />
+                </div>
+              )}
+
+              {/* STEP 7: Manufacturing Forecast */}
+              {currentStep === 7 && predictions && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-bold">Manufacturing Forecast</h2>
+                    <p className="text-zinc-400 text-sm">Yield prediction, defect zones, delay analysis, shortage risks</p>
+                  </div>
+
+                  <YieldForecast predictions={predictions} />
+
+                  {design && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <ManufacturabilityScore designId={design.id} />
+                      <CarbonEstimator designId={design.id} />
+                    </div>
+                  )}
+
+                  <StepNav
+                    onBack={() => setCurrentStep(6)}
+                    onNext={handleQCStep}
+                    nextLabel="Quality Control"
+                    nextIcon={<ShieldCheck size={16} />}
+                    loading={false}
+                  />
+                </div>
+              )}
+
+              {/* STEP 8: Quality Control */}
+              {currentStep === 8 && (
+                <div className="space-y-5">
+                  <div>
+                    <h2 className="text-xl font-bold">Quality Control & Feedback</h2>
+                    <p className="text-zinc-400 text-sm">Upload fabricated chip images for AI-powered defect detection</p>
+                  </div>
+
+                  <QualityControl
+                    onUpload={handleQCUpload}
+                    result={qualityCheck}
+                    loading={loading}
                   />
 
-                  <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-2xl">
-                    <h3 className="font-bold mb-4">Supplier Diversity & Resilience</h3>
-                    <div className="flex items-center gap-4">
-                        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
-                            <div className="w-[60%] h-full bg-indigo-500"></div>
-                            <div className="w-[25%] h-full bg-emerald-500"></div>
-                            <div className="w-[15%] h-full bg-amber-500"></div>
-                        </div>
-                        <span className="text-xs font-mono text-zinc-400">85/100</span>
-                    </div>
-                    <div className="flex gap-4 mt-4">
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                            <span className="text-[10px] text-zinc-500 uppercase">Digi-Key</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                            <span className="text-[10px] text-zinc-500 uppercase">Mouser</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                            <span className="text-[10px] text-zinc-500 uppercase">Avnet</span>
-                        </div>
-                    </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setCurrentStep(7)} className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2">
+                      <ChevronLeft size={16} /> Back
+                    </button>
+                    <button onClick={handleNewDesign} className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-medium text-sm transition-all">
+                      Start New Design
+                    </button>
                   </div>
-
-                  <button 
-                    onClick={() => setCurrentStep(1)}
-                    className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 rounded-2xl font-bold transition-all"
-                  >
-                    Start New Design
-                  </button>
                 </div>
               )}
             </motion.div>
           </AnimatePresence>
         </div>
 
-        {/* Right Column: Orchestration & Stats */}
-        <div className="lg:col-span-4 space-y-6">
-          <OrchestrationStatus orders={orders} />
-          
-          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-            <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest mb-4">System Health</h3>
-            <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">watsonx.ai Engine</span>
-                    <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
-                </div>
-                <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">Digital Twin Core</span>
-                    <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
-                </div>
-                <div className="flex justify-between items-center">
-                    <span className="text-xs text-zinc-400">Digi-Key API</span>
-                    <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded-full border border-emerald-500/20">ONLINE</span>
-                </div>
+        {/* Right: Status Panel */}
+        <div className="lg:col-span-3 space-y-4">
+          {design && <OrchestrationStatus designId={design.id} currentStep={currentStep} />}
+
+          <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+            <h3 className="text-[10px] uppercase font-mono text-zinc-500 tracking-widest mb-3">System Health</h3>
+            <div className="space-y-2.5">
+              <HealthRow label="AI Engine (Gemini)" status="ONLINE" />
+              <HealthRow label="Simulation Core" status="ONLINE" />
+              <HealthRow label="Component Catalog" status="ONLINE" />
+              <HealthRow label="Supply Chain DB" status="ONLINE" />
             </div>
           </div>
 
-          <div className="bg-indigo-600/10 border border-indigo-500/20 p-6 rounded-2xl relative overflow-hidden group">
-            <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform duration-700">
-                <Zap size={120} />
+          {arch && (
+            <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
+              <h3 className="text-[10px] uppercase font-mono text-zinc-500 tracking-widest mb-3">Design Summary</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between"><span className="text-zinc-500">Chip</span><span className="text-zinc-200 font-medium">{arch.name}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Node</span><span className="text-zinc-200">{arch.process_node}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Power</span><span className="text-zinc-200">{arch.total_power_mw.toFixed(1)} mW</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Area</span><span className="text-zinc-200">{arch.total_area_mm2.toFixed(2)} mm²</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Blocks</span><span className="text-zinc-200">{arch.blocks.length}</span></div>
+                <div className="flex justify-between"><span className="text-zinc-500">Substrate</span><span className="text-zinc-200">{arch.substrate}</span></div>
+              </div>
             </div>
-            <h4 className="font-bold text-indigo-400 mb-2">Pro Tip</h4>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-                Use natural language to specify power constraints. For example: "Optimize for ultra-low sleep current below 1uA."
-            </p>
-          </div>
+          )}
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-zinc-800 py-8 mt-12">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest">© 2026 SiliconSentinel Pro · Powered by Open APIs & Gemini AI</p>
-          <div className="flex gap-6">
-            <a href="#" className="text-zinc-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">Documentation</a>
-            <a href="#" className="text-zinc-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">API Reference</a>
-            <a href="#" className="text-zinc-500 hover:text-white text-[10px] font-mono uppercase tracking-widest transition-colors">Support</a>
-          </div>
+      <footer className="border-t border-zinc-800 py-6 mt-8">
+        <div className="max-w-7xl mx-auto px-6 text-center">
+          <p className="text-zinc-600 text-[10px] font-mono uppercase tracking-widest">
+            SiliconSentinel Pro v2.0 · IBM watsonx Orchestrate Ready · Powered by Gemini AI + Physics-Based Simulation
+          </p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// Shared UI components
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-zinc-900/50 border border-zinc-800 p-3 rounded-xl">
+      <p className="text-[10px] text-zinc-500 font-mono uppercase">{label}</p>
+      <p className="text-base font-bold mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+function PassFailBadge({ status, score }: { status: string; score: number }) {
+  const color = status === 'PASS' ? 'emerald' : status === 'WARNING' ? 'amber' : 'red';
+  return (
+    <div className={`px-3 py-1.5 bg-${color}-500/10 border border-${color}-500/30 rounded-lg flex items-center gap-2`}>
+      <ShieldCheck className={`text-${color}-400`} size={14} />
+      <span className={`text-xs font-bold text-${color}-400`}>{status} — {score.toFixed(0)}/100</span>
+    </div>
+  );
+}
+
+function RiskBadge({ level }: { level: string }) {
+  const colors: Record<string, string> = {
+    LOW: 'bg-emerald-500/20 text-emerald-400',
+    MEDIUM: 'bg-amber-500/20 text-amber-400',
+    HIGH: 'bg-orange-500/20 text-orange-400',
+    CRITICAL: 'bg-red-500/20 text-red-400',
+  };
+  return <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${colors[level] || colors.MEDIUM}`}>{level}</span>;
+}
+
+function HealthRow({ label, status }: { label: string; status: string }) {
+  return (
+    <div className="flex justify-between items-center">
+      <span className="text-xs text-zinc-400">{label}</span>
+      <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20">{status}</span>
+    </div>
+  );
+}
+
+function StepNav({ onBack, onNext, nextLabel, nextIcon, loading }: {
+  onBack: () => void;
+  onNext: () => void;
+  nextLabel: string;
+  nextIcon: React.ReactNode;
+  loading: boolean;
+}) {
+  return (
+    <div className="flex gap-3">
+      <button onClick={onBack} className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2">
+        <ChevronLeft size={16} /> Back
+      </button>
+      <button onClick={onNext} disabled={loading}
+        className="flex-[2] py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl font-medium text-sm flex items-center justify-center gap-2 transition-all">
+        {loading ? <Loader2 className="animate-spin" size={16} /> : nextIcon}
+        {nextLabel}
+      </button>
     </div>
   );
 }

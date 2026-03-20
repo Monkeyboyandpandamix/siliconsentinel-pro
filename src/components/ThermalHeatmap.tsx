@@ -1,131 +1,131 @@
 import React, { useEffect, useRef } from 'react';
-import { ChipArchitecture } from '../types';
+import type { ThermalMapData, BlockSpec } from '../types';
 
 interface Props {
-  architecture: ChipArchitecture;
+  thermal: ThermalMapData;
+  blocks: BlockSpec[];
 }
 
-export const ThermalHeatmap: React.FC<Props> = ({ architecture }) => {
+export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (!canvasRef.current || !architecture) return;
-
+    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
+    const w = canvas.width;
+    const h = canvas.height;
+    const pad = 40;
 
-    // Clear
     ctx.fillStyle = '#09090b';
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, w, h);
 
-    // Draw Grid
+    // Grid
     ctx.strokeStyle = '#18181b';
     ctx.lineWidth = 0.5;
-    for (let x = 0; x <= width; x += 20) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    }
-    for (let y = 0; y <= height; y += 20) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-    }
+    for (let x = 0; x <= w; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 0; y <= h; y += 20) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
 
-    // Draw Chip Border
-    const padding = 40;
+    // Chip border
     ctx.strokeStyle = '#3f3f46';
     ctx.lineWidth = 2;
-    ctx.strokeRect(padding, padding, width - padding * 2, height - padding * 2);
+    ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
 
-    // Draw Floorplan Background
-    architecture.blocks.forEach(block => {
-      const bx = (block.x / 100) * (width - padding * 2) + padding;
-      const by = (block.y / 100) * (height - padding * 2) + padding;
-      const bw = (block.width / 100) * (width - padding * 2);
-      const bh = (block.height / 100) * (height - padding * 2);
+    const grid = thermal.grid;
+    const res = grid.length;
+    if (res === 0) return;
 
-      // Block Border
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    const cellW = (w - pad * 2) / res;
+    const cellH = (h - pad * 2) / res;
+
+    const tMin = thermal.min_temp_c;
+    const tMax = thermal.max_temp_c;
+    const tRange = Math.max(tMax - tMin, 1);
+
+    // Colorblind-safe sequential palette (white → blue → dark blue)
+    for (let row = 0; row < res; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        const t = grid[row][col];
+        const norm = (t - tMin) / tRange;
+
+        // Sequential: cool (dark blue) → warm (yellow/red)
+        const r = Math.floor(norm * 255);
+        const g = Math.floor(Math.max(0, (1 - Math.abs(norm - 0.5) * 2)) * 180);
+        const b = Math.floor((1 - norm) * 200);
+
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.7)`;
+        ctx.fillRect(pad + col * cellW, pad + row * cellH, cellW + 0.5, cellH + 0.5);
+      }
+    }
+
+    // Block outlines + text labels
+    ctx.globalCompositeOperation = 'source-over';
+    blocks.forEach(block => {
+      const bx = (block.x / 100) * (w - pad * 2) + pad;
+      const by = (block.y / 100) * (h - pad * 2) + pad;
+      const bw = (block.width / 100) * (w - pad * 2);
+      const bh = (block.height / 100) * (h - pad * 2);
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 1;
       ctx.strokeRect(bx, by, bw, bh);
-      
-      // Block Fill
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
-      ctx.fillRect(bx, by, bw, bh);
 
-      // Sub-grid for block
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
-      ctx.beginPath();
-      ctx.moveTo(bx + bw/2, by); ctx.lineTo(bx + bw/2, by + bh);
-      ctx.moveTo(bx, by + bh/2); ctx.lineTo(bx + bw, by + bh/2);
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.font = '7px monospace';
-      ctx.fillText(block.name, bx + 4, by + 10);
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText(block.name, bx + 3, by + 10);
     });
 
-    // Generate heatmap points
-    const points: { x: number; y: number; temp: number; radius: number }[] = architecture.blocks.map(block => ({
-      x: (block.x / 100) * (width - padding * 2) + padding + ((block.width / 100) * (width - padding * 2)) / 2,
-      y: (block.y / 100) * (height - padding * 2) + padding + ((block.height / 100) * (height - padding * 2)) / 2,
-      temp: block.powerConsumption / 100,
-      radius: (block.area * 2.5) + 50
-    }));
+    // Zone temperature labels
+    thermal.zones.forEach(zone => {
+      const block = blocks.find(b => b.id === zone.block_id);
+      if (!block) return;
+      const bx = (block.x / 100) * (w - pad * 2) + pad;
+      const by = (block.y / 100) * (h - pad * 2) + pad;
+      const bw = (block.width / 100) * (w - pad * 2);
+      const bh = (block.height / 100) * (h - pad * 2);
 
-    // Draw gradients for each point
-    points.forEach(p => {
-      const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.radius);
-      
-      // Heat colors - more standard thermal palette
-      const intensity = Math.min(p.temp, 1);
-      gradient.addColorStop(0, `rgba(255, ${Math.floor(200 * (1 - intensity))}, 0, ${0.8 * intensity})`);
-      gradient.addColorStop(0.5, `rgba(255, ${Math.floor(100 * (1 - intensity))}, 0, ${0.4 * intensity})`);
-      gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
-
-      ctx.fillStyle = gradient;
-      ctx.globalCompositeOperation = 'lighter'; // Use lighter for additive heat
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = zone.status === 'CRITICAL' ? '#ef4444' : zone.status === 'WARNING' ? '#f59e0b' : '#22c55e';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${zone.temperature_c.toFixed(0)}°C`, bx + bw / 2, by + bh / 2 + 3);
+      ctx.textAlign = 'start';
     });
 
-    // Draw grid
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < width; i += 20) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, height);
-      ctx.stroke();
-    }
-    for (let i = 0; i < height; i += 20) {
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(width, i);
-      ctx.stroke();
-    }
-
-  }, [architecture]);
+  }, [thermal, blocks]);
 
   return (
-    <div className="bg-zinc-950 rounded-xl border border-zinc-800 p-4">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-zinc-400 text-xs font-mono uppercase tracking-widest text-center w-full">Digital Twin: Thermal Behavior Map</h3>
-      </div>
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-zinc-800 shadow-2xl">
-        <canvas ref={canvasRef} width={800} height={450} className="w-full h-full" />
-        <div className="absolute bottom-4 right-4 flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-                <div className="w-24 h-2 bg-gradient-to-r from-blue-500 via-yellow-500 to-red-600 rounded"></div>
-            </div>
-            <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
-                <span>30°C</span>
-                <span>85°C</span>
-            </div>
+    <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-xs uppercase font-mono text-zinc-400">Thermal Behavior Map</h3>
+        <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono">
+          <span>Ambient: {thermal.ambient_temp_c}°C</span>
+          <span>Max: {thermal.max_temp_c.toFixed(1)}°C</span>
+          {thermal.hotspot_count > 0 && <span className="text-red-400">{thermal.hotspot_count} hotspot{thermal.hotspot_count > 1 ? 's' : ''}</span>}
         </div>
+      </div>
+      <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-zinc-800">
+        <canvas ref={canvasRef} width={800} height={450} className="w-full h-full" role="img" aria-label="Thermal heatmap of chip die" />
+        <div className="absolute bottom-3 right-3 flex flex-col gap-0.5">
+          <div className="w-24 h-2 rounded" style={{ background: 'linear-gradient(to right, #0000c8, #00b400, #ffc800, #ff0000)' }} />
+          <div className="flex justify-between text-[8px] text-zinc-400 font-mono">
+            <span>{thermal.min_temp_c.toFixed(0)}°C</span>
+            <span>{thermal.max_temp_c.toFixed(0)}°C</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Zone status table */}
+      <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-2">
+        {thermal.zones.map(z => (
+          <div key={z.block_id} className="flex items-center gap-2 text-xs">
+            <span className={`w-2 h-2 rounded-full ${z.status === 'CRITICAL' ? 'bg-red-500' : z.status === 'WARNING' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+            <span className="text-zinc-400 truncate">{z.block_name}</span>
+            <span className="text-zinc-300 font-mono ml-auto">{z.temperature_c.toFixed(0)}°C</span>
+            <span className={`text-[10px] font-bold ${z.status === 'CRITICAL' ? 'text-red-400' : z.status === 'WARNING' ? 'text-amber-400' : 'text-emerald-400'}`}>{z.status}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
