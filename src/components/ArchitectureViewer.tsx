@@ -209,6 +209,10 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
   }, []);
 
   useEffect(() => {
+    // Only draw the blueprint SVG when blueprint mode is active.
+    // Without this, toggling blueprint <-> physical can remount the SVG
+    // but not re-run the D3 draw (because `architecture` did not change).
+    if (viewMode !== 'blueprint') return;
     if (!svgRef.current || !architecture?.blocks?.length) return;
 
     const svg = d3.select(svgRef.current);
@@ -497,7 +501,7 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
       .attr('opacity', 1);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [architecture]);
+  }, [architecture, viewMode]);
 
   // Redraw wires when showWiring changes without full re-render
   useEffect(() => {
