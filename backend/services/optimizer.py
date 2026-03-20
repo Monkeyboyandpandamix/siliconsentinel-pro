@@ -84,10 +84,11 @@ class OptimizerService:
             },
         )
         self.db.add(opt_run)
+        # Flush to assign PKs; avoids fragile refresh() timing on SQLite.
+        await self.db.flush()
 
         design.architecture_json = optimized_arch
         await self.db.commit()
-        await self.db.refresh(opt_run)
 
         return OptimizationResponse(
             id=opt_run.id,

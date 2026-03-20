@@ -66,8 +66,9 @@ class SimulationEngineService:
             bottlenecks=bottlenecks,
         )
         self.db.add(sim)
+        # Flush to assign PKs deterministically for the response.
+        await self.db.flush()
         await self.db.commit()
-        await self.db.refresh(sim)
 
         return SimulationResponse(
             id=sim.id,

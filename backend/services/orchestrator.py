@@ -54,8 +54,10 @@ class OrchestratorService:
             started_at=now,
         )
         self.db.add(order)
+        # Flush to assign PKs (SQLite + SQLAlchemy sometimes can't `refresh()`
+        # immediately after commit, even though the row exists).
+        await self.db.flush()
         await self.db.commit()
-        await self.db.refresh(order)
         return order
 
     async def complete_order(self, order_id: int, success: bool = True, error: str | None = None):
