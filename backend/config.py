@@ -7,6 +7,32 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_DB_PATH = _PROJECT_ROOT / "siliconsentinel.db"
 
+def _normalize_sqlite_url(url: str) -> str:
+    """
+    Ensure sqlite URLs always resolve to an absolute path.
+
+    This prevents cases where `.env` sets a relative sqlite path (like
+    `sqlite+aiosqlite:///./siliconsentinel.db`) but the backend working
+    directory changes, leading to a different DB file that may be read-only.
+    """
+    prefix = "sqlite+aiosqlite:///"
+    if not url.startswith(prefix):
+        return url
+
+    # Strip prefix; remaining part is the sqlite path (optionally with query params).
+    raw = url[len(prefix) :]
+    # Remove any accidental read-only query params (best-effort).
+    raw = raw.split("?", 1)[0]
+
+    # If it's already absolute, keep it.
+    if raw.startswith("/"):
+        return f"{prefix}{raw}"
+
+    # Resolve relative paths against the project root.
+    rel = raw.lstrip("./")
+    abs_path = (_PROJECT_ROOT / rel).resolve()
+    return f"{prefix}{abs_path.as_posix()}"
+
 
 class Settings(BaseSettings):
     app_name: str = "SiliconSentinel Pro"
@@ -44,4 +70,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # Normalize potentially-relative DB URL coming from `.env`.
+    settings.silicon_db_url = _normalize_sqlite_url(settings.silicon_db_url)
+    return settings
