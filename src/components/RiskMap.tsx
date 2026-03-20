@@ -57,7 +57,8 @@ interface Props {
 }
 
 export const RiskMap: React.FC<Props> = ({ data }) => {
-  const geoByCountry = new Map(data.geopolitical_risks.map((item) => [item.region, item]));
+  type GeoRisk = { region: string; risk_level: string; factors: string[]; mitigation: string };
+  const geoByCountry = new Map<string, GeoRisk>(data.geopolitical_risks.map(item => [item.region, item]));
   const points: RiskPoint[] = data.fab_recommendations
     .map((fab) => {
       const geo = geoByCountry.get(fab.country);

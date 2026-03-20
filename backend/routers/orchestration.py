@@ -203,16 +203,21 @@ async def _call_watson_orchestrate(message: str, context_prefix: str, history: l
             sess_path = f"{base}/v2/assistants/{assistant_id}/sessions"
             try:
                 sess_resp = await client.post(sess_path, headers=headers)
-                logger.warning(
-                    f"WxO Session {sess_path}: HTTP {sess_resp.status_code} "
-                    f"body={sess_resp.text[:300]}"
-                )
                 if sess_resp.status_code in (200, 201):
-                    session_id = sess_resp.json().get("session_id")
-                    working_base = base
-                    break
+                    data = sess_resp.json()
+                    if isinstance(data, dict) and "session_id" in data:
+                        session_id = data["session_id"]
+                        working_base = base
+                        logger.info(f"WxO session created at {sess_path}")
+                        break
+                    else:
+                        logger.warning(f"WxO session path {sess_path}: HTTP 200 but no session_id in JSON response")
+                else:
+                    logger.debug(f"WxO session path {sess_path}: HTTP {sess_resp.status_code}")
+            except ValueError as e:
+                logger.debug(f"WxO session path {sess_path}: JSON parse error — {e}")
             except Exception as e:
-                logger.warning(f"WxO Session attempt failed for {sess_path}: {e}")
+                logger.debug(f"WxO session path {sess_path}: {e}")
                 continue
 
         if not session_id or not working_base:

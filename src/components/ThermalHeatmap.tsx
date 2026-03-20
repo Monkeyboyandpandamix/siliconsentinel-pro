@@ -219,8 +219,8 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
     const barX = w - pad + 16;
     const barH = h - pad * 2;
     const barGrad = ctx.createLinearGradient(0, h - pad, 0, pad);
-    [[0, [20, 40, 120]], [0.25, [20, 140, 200]], [0.5, [30, 180, 80]], [0.7, [230, 200, 20]], [0.85, [240, 100, 20]], [1, [220, 20, 20]]]
-      .forEach(([stop, [r, g, b]]) => barGrad.addColorStop(stop as number, `rgb(${r},${g},${b})`));
+    const barStops: [number, [number, number, number]][] = [[0, [20,40,120]],[0.25,[20,140,200]],[0.5,[30,180,80]],[0.7,[230,200,20]],[0.85,[240,100,20]],[1,[220,20,20]]];
+    barStops.forEach(([stop, [r, g, b]]) => barGrad.addColorStop(stop, `rgb(${r},${g},${b})`));
     ctx.fillStyle = barGrad;
     ctx.fillRect(barX, pad, 8, barH);
     ctx.strokeStyle = '#3f3f46';

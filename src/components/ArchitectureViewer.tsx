@@ -123,7 +123,7 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
     wg.selectAll('*').remove();
     if (!showWiringRef.current) return;
 
-    const blockMap = new Map(layout.map(b => [b.id, b]));
+    const blockMap = new Map<string, LayoutBlock>(layout.map(b => [b.id, b] as [string, LayoutBlock]));
 
     layout.forEach(block => {
       block.connections.forEach(targetId => {
@@ -502,7 +502,7 @@ export const ArchitectureViewer: React.FC<Props> = ({ architecture }) => {
     redrawWires();
   }, [showWiring, redrawWires]);
 
-  const blockTypes = Array.from(new Set(architecture.blocks.map(b => b.type)));
+  const blockTypes: string[] = Array.from(new Set<string>(architecture.blocks.map(b => String(b.type))));
 
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 overflow-hidden">
