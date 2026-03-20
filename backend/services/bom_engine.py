@@ -1,5 +1,6 @@
 """Module 5: BOM Engine service with realistic component catalog."""
 
+import asyncio
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
@@ -11,6 +12,7 @@ from backend.schemas.bom import (
     CostBreakdown, CostScenario, AlternatePart,
 )
 from backend.services.ai_provider import get_ai_provider
+from backend.services.nexar_client import get_live_price
 from backend.semiconductor.process_nodes import get_process_node, estimate_dies_per_wafer
 from backend.semiconductor.component_db import get_standard_bom_for_domain
 
@@ -38,6 +40,24 @@ class BOMEngineService:
             ai_entries = []
 
         merged = self._merge_bom_sources(catalog_entries, ai_entries)
+
+        # Attempt to enrich up to 8 entries with live pricing (Nexar/Mouser).
+        # Fire requests concurrently; fall back to catalog price on any failure.
+        try:
+            live_tasks = [
+                get_live_price(entry.get("part_number", ""))
+                for entry in merged[:8]
+            ]
+            live_results = await asyncio.gather(*live_tasks, return_exceptions=True)
+            for entry, live in zip(merged[:8], live_results):
+                if isinstance(live, dict) and live.get("unit_price"):
+                    entry["unit_price"]   = live["unit_price"]
+                    entry["availability"] = live.get("availability", entry.get("availability", "In Stock"))
+                    if live.get("supplier"):
+                        entry["supplier"] = live["supplier"]
+                    entry["price_source"] = live.get("source", "live")
+        except Exception as exc:
+            logger.warning(f"Live pricing enrichment error: {exc}")
 
         # Clear previous BOM
         await self.db.execute(delete(BOMEntry).where(BOMEntry.design_id == design.id))

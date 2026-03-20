@@ -24,8 +24,9 @@ class AIProvider(ABC):
         """Generate BOM entries from architecture specification."""
 
     @abstractmethod
-    async def analyze_defects(self, image_description: str, design_context: dict) -> dict:
-        """Analyze chip image for defects."""
+    async def analyze_defects(self, image_description: str, design_context: dict, image_path: str | None = None) -> dict:
+        """Analyze chip image for defects. If image_path is provided and the provider supports vision,
+        actual image bytes are sent for real visual analysis."""
 
     @abstractmethod
     async def optimize_design(self, architecture: dict, sim_results: dict, focus: str) -> dict:
@@ -227,7 +228,7 @@ class PhysicsProvider(AIProvider):
         # Return empty — the catalog fallback in bom_engine.py is comprehensive
         return []
 
-    async def analyze_defects(self, image_description: str, design_context: dict) -> dict:
+    async def analyze_defects(self, image_description: str, design_context: dict, image_path: str | None = None) -> dict:
         return {
             "defect_count": 0,
             "pass_fail": "PASS",
@@ -360,10 +361,38 @@ class GeminiProvider(AIProvider):
         data = self._extract_json(response)
         return data.get("entries", data) if isinstance(data, dict) else data
 
-    async def analyze_defects(self, image_description: str, design_context: dict) -> dict:
+    async def analyze_defects(self, image_description: str, design_context: dict, image_path: str | None = None) -> dict:
+        import asyncio, mimetypes
         from backend.prompts.defect_analysis import get_defect_analysis_prompt
-        full_prompt = get_defect_analysis_prompt(image_description, design_context)
-        response = await self._call(full_prompt)
+        from google.genai import types as genai_types
+
+        text_prompt = get_defect_analysis_prompt(image_description, design_context)
+
+        # If an image file is available, send actual bytes for real vision analysis
+        if image_path:
+            import os
+            try:
+                with open(image_path, "rb") as fh:
+                    image_bytes = fh.read()
+                mime = mimetypes.guess_type(image_path)[0] or "image/jpeg"
+                parts = [
+                    genai_types.Part.from_bytes(data=image_bytes, mime_type=mime),
+                    genai_types.Part.from_text(text=text_prompt),
+                ]
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.model,
+                    contents=genai_types.Content(role="user", parts=parts),
+                )
+                return self._extract_json(response.text)
+            except FileNotFoundError:
+                pass  # fall through to text-only call
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(f"Gemini vision call failed, falling back to text: {exc}")
+
+        # Text-only fallback (no image key or read failure)
+        response = await self._call(text_prompt)
         return self._extract_json(response)
 
     async def optimize_design(self, architecture: dict, sim_results: dict, focus: str) -> dict:
@@ -405,8 +434,8 @@ class WatsonxProvider(AIProvider):
     async def generate_bom(self, architecture: dict, domain: str) -> list[dict]:
         return await self._fallback.generate_bom(architecture, domain)
 
-    async def analyze_defects(self, image_description: str, design_context: dict) -> dict:
-        return await self._fallback.analyze_defects(image_description, design_context)
+    async def analyze_defects(self, image_description: str, design_context: dict, image_path: str | None = None) -> dict:
+        return await self._fallback.analyze_defects(image_description, design_context, image_path)
 
     async def optimize_design(self, architecture: dict, sim_results: dict, focus: str) -> dict:
         return await self._fallback.optimize_design(architecture, sim_results, focus)

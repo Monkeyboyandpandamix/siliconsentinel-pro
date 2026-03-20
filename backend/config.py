@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     watson_stt_api_key: str = ""
     watson_stt_url: str = ""
     electricity_maps_api_key: str = ""
+    # Nexar (Octopart) API — free tier at https://nexar.com/api (OAuth2 client creds)
+    nexar_client_id: str = ""
+    nexar_client_secret: str = ""
+    # Mouser Electronics API — free API key at https://www.mouser.com/api-search/
+    mouser_api_key: str = ""
     upload_dir: str = "uploads"
     cors_origins: list[str] = ["*"]
 

@@ -122,6 +122,9 @@ Endpoint: `POST /api/designs/{id}/carbon`
 | `WatsonxProvider` raised `NotImplementedError` on all calls | Now delegates to `PhysicsProvider` with warning |
 | `performance` score hardcoded 75.0 in constraint satisfaction | Now derived from block clock_mhz vs node |
 | Chat endpoint had no input length limit | Added 2000-char cap |
+| Quality inspector sent filename only to AI | GeminiProvider now sends actual image bytes via Gemini Vision multimodal API |
+| No rate limiting on any endpoint | Added slowapi: 10/min (design gen), 20/min (chat), 5/min (quality check), 200/min default |
+| No live component pricing — static catalog only | Added Nexar (Octopart) + Mouser API client; BOM engine enriches top 8 parts with live pricing |
 
 ## Honest Capability Description
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ import base64
 
 from backend.database import get_db
 from backend.config import get_settings
+from backend.limiter import limiter
 from backend.models.orchestration import OrchestrationOrder
 from backend.schemas.orchestration import OrchestrationOrderResponse, PipelineStatusResponse
 from backend.services.orchestrator import OrchestratorService
@@ -444,7 +445,8 @@ def _smart_fallback_response(message: str, ctx: dict[str, Any]) -> str:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def orchestrate_chat(req: ChatRequest):
+@limiter.limit("20/minute")
+async def orchestrate_chat(request: Request, req: ChatRequest):
     settings = get_settings()
 
     # Guard against very large inputs to reduce prompt injection surface

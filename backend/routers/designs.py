@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.database import get_db
+from backend.limiter import limiter
 from backend.models.design import Design
 from backend.schemas.design import DesignCreateRequest, DesignResponse
 from backend.services.design_copilot import DesignCopilotService
@@ -12,7 +13,8 @@ router = APIRouter()
 
 
 @router.post("", response_model=DesignResponse, status_code=201)
-async def create_design(req: DesignCreateRequest, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def create_design(request: Request, req: DesignCreateRequest, db: AsyncSession = Depends(get_db)):
     service = DesignCopilotService(db)
     try:
         design = await service.create_design(req)

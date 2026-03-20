@@ -34,7 +34,8 @@ class QualityInspectorService:
         )
 
         try:
-            ai_result = await self.ai.analyze_defects(image_description, design_context)
+            # Pass image_path so GeminiProvider can perform real vision analysis
+            ai_result = await self.ai.analyze_defects(image_description, design_context, image_path=image_path)
         except Exception as e:
             logger.error(f"AI defect analysis failed: {e}")
             ai_result = {

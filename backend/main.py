@@ -1,12 +1,17 @@
 from contextlib import asynccontextmanager
+import asyncio
 import os
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from backend.config import get_settings
 from backend.database import init_db
+from backend.limiter import limiter
 
 
 @asynccontextmanager
@@ -23,6 +28,11 @@ app = FastAPI(
     version="2.0.0",
     lifespan=lifespan,
 )
+
+# Rate-limiting middleware — default 200 req/min per IP, tighter limits on expensive endpoints
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -111,10 +121,14 @@ async def _probe_gemini(settings) -> str:
 
 @app.get("/api/health/detailed")
 async def health_detailed():
+    from backend.services.nexar_client import check_nexar_status
     settings = get_settings()
-    tts_status, orch_status, gemini_status = await _probe_watson_tts(settings), \
-        await _probe_watson_orchestrate(settings), \
-        await _probe_gemini(settings)
+    tts_status, orch_status, gemini_status, nexar_status = await asyncio.gather(
+        _probe_watson_tts(settings),
+        _probe_watson_orchestrate(settings),
+        _probe_gemini(settings),
+        check_nexar_status(),
+    )
 
     return {
         "backend": "ONLINE",
@@ -124,4 +138,5 @@ async def health_detailed():
         "simulation_core": "ONLINE",
         "component_catalog": "ONLINE",
         "supply_chain_db": "ONLINE",
+        "live_component_pricing": nexar_status,
     }

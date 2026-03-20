@@ -110,6 +110,7 @@ export default function App() {
     simulation_core: 'ONLINE',
     component_catalog: 'ONLINE',
     supply_chain_db: 'ONLINE',
+    live_component_pricing: '...',
   });
 
   useEffect(() => {
@@ -778,6 +779,7 @@ export default function App() {
               <HealthRow label="Simulation Core" status={health.simulation_core} />
               <HealthRow label="Component Catalog" status={health.component_catalog} />
               <HealthRow label="Supply Chain DB" status={health.supply_chain_db} />
+              <HealthRow label="Live Component Pricing" status={health.live_component_pricing ?? 'NO KEY'} />
             </div>
           </div>
 
@@ -857,7 +859,7 @@ function RiskBadge({ level }: { level: string }) {
 
 function HealthRow({ label, status }: { label: string; status: string }) {
   const cls =
-    status === 'ONLINE'
+    status === 'ONLINE' || status === 'MOUSER_ONLY'
       ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
       : status === 'NO KEY'
         ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'

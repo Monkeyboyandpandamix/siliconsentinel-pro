@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import os
 
 from backend.database import get_db
 from backend.config import get_settings
+from backend.limiter import limiter
 from backend.models.design import Design
 from backend.schemas.quality import QualityCheckResponse
 from backend.services.orchestrator import OrchestratorService
@@ -22,7 +23,9 @@ _ALLOWED_IMAGE_TYPES = {
 
 
 @router.post("/{design_id}/quality-check", response_model=QualityCheckResponse)
+@limiter.limit("5/minute")
 async def run_quality_check(
+    request: Request,
     design_id: int,
     image: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
