@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -77,23 +77,35 @@ async def tts_speak(req: TTSSpeakRequest):
     tts_url = settings.watson_tts_url.rstrip("/")
 
     if not api_key or not tts_url:
-        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="Watson TTS not configured")
 
     watson_voice = WATSON_VOICE_MAP.get(req.voice.lower(), "en-US_AllisonV3Voice")
     text = req.text[:5000]
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.post(
-            f"{tts_url}/v1/synthesize",
-            auth=(  "apikey", api_key),
-            headers={"Content-Type": "application/json", "Accept": "audio/mp3"},
-            params={"voice": watson_voice},
-            json={"text": text},
-        )
-        resp.raise_for_status()
-        return Response(
-            content=resp.content,
-            media_type="audio/mpeg",
-            headers={"Cache-Control": "no-store"},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                f"{tts_url}/v1/synthesize",
+                auth=("apikey", api_key),
+                headers={"Content-Type": "application/json", "Accept": "audio/mp3"},
+                params={"voice": watson_voice},
+                json={"text": text},
+            )
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = "Watson TTS rejected the request"
+        try:
+            payload = exc.response.json()
+            detail = payload.get("error") or payload.get("detail") or detail
+        except Exception:
+            if exc.response.text:
+                detail = exc.response.text[:200]
+        raise HTTPException(status_code=502, detail=detail)
+    except httpx.RequestError:
+        raise HTTPException(status_code=503, detail="Watson TTS service unreachable")
+
+    return Response(
+        content=resp.content,
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store"},
+    )
