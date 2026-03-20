@@ -163,7 +163,7 @@ export default function App() {
 
   return (
     <div 
-      className={`min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-500 ${settings.highContrast ? 'contrast-125' : ''}`}
+      className={`min-h-screen bg-black text-zinc-100 font-sans selection:bg-indigo-500/30 transition-all duration-500 ${settings.highContrast ? 'theme-high-contrast' : ''}`}
       style={{ fontSize: `${settings.uiScale * 100}%` }}
     >
       {/* AI Assistant (Open API Replacement) */}
