@@ -115,8 +115,13 @@ async def _probe_watson_orchestrate(settings) -> str:
                 data={
                     "apikey": settings.watson_orchestrate_api_key,
                     "grant_type": "urn:ibm:params:oauth:grant-type:apikey",
+                    "response_type": "cloud_iam",
                 },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    # IBM IAM API-key grant requires Basic bx:bx.
+                    "Authorization": "Basic Yng6Yng=",
+                },
             )
         if iam_resp.status_code != 200:
             return "AUTH ERROR"
