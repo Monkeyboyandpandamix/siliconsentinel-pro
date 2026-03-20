@@ -129,6 +129,32 @@ export default function App() {
     }
   };
 
+  const handleExportCSV = () => {
+    if (!bom || bom.length === 0) return;
+
+    const headers = ['Part Number', 'Description', 'Quantity', 'Unit Price', 'Availability', 'Lead Time'];
+    const csvContent = [
+      headers.join(','),
+      ...bom.map(item => [
+        `"${item.partNumber}"`,
+        `"${item.description}"`,
+        item.quantity,
+        item.unitPrice,
+        `"${item.availability}"`,
+        `"${item.leadTime}"`
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `bom_export_${architecture?.name?.replace(/\s+/g, '_').toLowerCase() || 'design'}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleUpdateArchitecture = async (command: string) => {
     if (!architecture) return;
     setLoading(true);
@@ -500,7 +526,7 @@ export default function App() {
                       <p className="text-zinc-400 text-sm">BOM, allocation planning, and manufacturing response plan for {architecture?.name}</p>
                     </div>
                     <div className="flex gap-2">
-                        <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">Export CSV</button>
+                        <button onClick={handleExportCSV} className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-xs font-bold transition-all">Export CSV</button>
                         <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold transition-all">Place Order</button>
                     </div>
                   </div>
