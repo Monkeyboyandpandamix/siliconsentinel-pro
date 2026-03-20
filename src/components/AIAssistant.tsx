@@ -2,8 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Bot, ExternalLink, Loader2, Minimize2, Maximize2, X } from 'lucide-react';
 
 const IBM_CHAT_ROOT_ID = 'wxo-chat-root';
-const IBM_HOST_URL = 'https://us-south.watson-orchestrate.cloud.ibm.com';
+const IBM_HOST_URL = import.meta.env.VITE_IBM_HOST_URL;
 const IBM_LOADER_ID = 'wxo-loader-script';
+const IBM_ORCHESTRATION_ID = import.meta.env.VITE_IBM_ORCHESTRATION_ID;
+const IBM_CRN = import.meta.env.VITE_IBM_CRN;
+const IBM_AGENT_ID = import.meta.env.VITE_IBM_AGENT_ID;
+const IBM_AGENT_ENVIRONMENT_ID = import.meta.env.VITE_IBM_AGENT_ENVIRONMENT_ID;
 
 export const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,15 +20,27 @@ export const AIAssistant: React.FC = () => {
       return;
     }
 
+    if (!IBM_HOST_URL || !IBM_ORCHESTRATION_ID || !IBM_CRN || !IBM_AGENT_ID) {
+      setLoadError('IBM chat is not configured. Add the required VITE_IBM_* values to .env.local before opening the assistant.');
+      setIsLoading(false);
+      return;
+    }
+
+    const chatOptions: Window['wxOConfiguration']['chatOptions'] = {
+      agentId: IBM_AGENT_ID,
+    };
+
+    if (IBM_AGENT_ENVIRONMENT_ID) {
+      chatOptions.agentEnvironmentId = IBM_AGENT_ENVIRONMENT_ID;
+    }
+
     window.wxOConfiguration = {
-      orchestrationID: 'f459230554db416db8c23a3534ec4e8b_c8a9d776-460e-4c9a-b55f-0a2556febf8e',
+      orchestrationID: IBM_ORCHESTRATION_ID,
       hostURL: IBM_HOST_URL,
       rootElementID: IBM_CHAT_ROOT_ID,
       deploymentPlatform: 'ibmcloud',
-      crn: 'crn:v1:bluemix:public:watsonx-orchestrate:us-south:a/f459230554db416db8c23a3534ec4e8b:c8a9d776-460e-4c9a-b55f-0a2556febf8e::',
-      chatOptions: {
-        agentId: 'c4e8c7f3-51da-4cc7-a9c3-9e055bbd7332',
-      },
+      crn: IBM_CRN,
+      chatOptions,
     };
 
     const existingScript = document.getElementById(IBM_LOADER_ID) as HTMLScriptElement | null;
@@ -103,6 +119,9 @@ export const AIAssistant: React.FC = () => {
                 {loadError && (
                   <div className="space-y-2">
                     <p>{loadError}</p>
+                    <p className="text-zinc-500">
+                      Verify your `agentId`, optional `agentEnvironmentId`, and IBM embedded chat security in the tenant.
+                    </p>
                     <a
                       href={`${IBM_HOST_URL}/wxochat/wxoLoader.js?embed=true`}
                       target="_blank"
