@@ -12,6 +12,7 @@ interface ChatPanelProps {
   bom: BOMResponse | null;
   supplyChain: SupplyChainResponse | null;
   predictions: PredictionsResponse | null;
+  onApplyInstruction?: (instruction: string) => Promise<string | void>;
 }
 
 interface Message {
@@ -263,7 +264,13 @@ function useSpeechToText(onTranscript: (text: string) => void) {
 // ─── ChatPanel component ──────────────────────────────────────────────────────
 
 export function ChatPanel({
-  design, simulation, optimization, bom, supplyChain, predictions,
+  design,
+  simulation,
+  optimization,
+  bom,
+  supplyChain,
+  predictions,
+  onApplyInstruction,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -295,6 +302,27 @@ export function ChatPanel({
     setLoading(true);
 
     try {
+      const wantsApply =
+        !!onApplyInstruction &&
+        /(add|change|modify|update|remove|replace)\b/i.test(text) &&
+        /(design|architecture|blocks|process|constraint|simulation|thermal|temperature|power|optimi|bom|supply|yield|forecast|stuff|\bit\b|\bthis\b|changes?)/i.test(text);
+
+      if (wantsApply) {
+        const summary = await onApplyInstruction(text);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content:
+              summary && summary.trim()
+                ? summary.trim()
+                : 'Applied your requested changes across the relevant modules.',
+            source: 'ai_co_pilot_action',
+          },
+        ]);
+        return;
+      }
+
       const ctx = buildContext(design, simulation, optimization, bom, supplyChain, predictions);
       const resp = await fetch('/api/orchestration/chat', {
         method: 'POST',
@@ -510,7 +538,9 @@ export function ChatPanel({
           </button>
         </div>
         <p className="text-[9px] text-zinc-600 mt-1.5 text-center">
-          {hasDesign ? 'Full chip context sent automatically' : 'Generate a design to unlock full context analysis'}
+          {hasDesign
+            ? 'Full chip context sent automatically. Say "add" or "change" to apply updates across modules.'
+            : 'Generate a design to unlock full context analysis'}
         </p>
       </div>
     </div>
