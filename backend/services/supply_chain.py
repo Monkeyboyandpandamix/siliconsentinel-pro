@@ -134,20 +134,14 @@ class SupplyChainService:
         self.db = db
 
     async def analyze(self, design: Design) -> dict:
-        import re, json, time, pathlib
+        import re
         arch = design.architecture_json
         process_node_name = arch.get("process_node", design.process_node or "28nm")
         pn = get_process_node(process_node_name)
 
-        # Fix: extract core Xnm token the same way process_nodes.py now does,
-        # so "7nm (N7)", "28nm (N28)", "14nm LPP", etc. all resolve correctly.
+        # Extract core Xnm token so "7nm (N7)", "28nm (N28)", "14nm LPP", etc. all resolve correctly.
         _m = re.search(r'(\d+\s*nm)', process_node_name, re.IGNORECASE)
         node_key = _m.group(1).replace(" ", "").lower() if _m else process_node_name.replace(" ", "").lower()
-
-        # region agent log
-        _lp = pathlib.Path("debug-8f466e.log")
-        _lp.open("a").write(json.dumps({"sessionId": "8f466e", "runId": "post-fix", "hypothesisId": "A", "location": "supply_chain.py:analyze", "message": "node resolution", "data": {"raw": process_node_name, "node_key": node_key}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # endregion
 
         matching_fabs = self._match_fabs(node_key, pn)
         geo_risks = self._assess_geopolitical_risks(matching_fabs)
@@ -203,12 +197,6 @@ class SupplyChainService:
             })
 
         results.sort(key=lambda f: f["overall_score"], reverse=True)
-
-        # region agent log
-        _lp = pathlib.Path("debug-8f466e.log")
-        _lp.open("a").write(json.dumps({"sessionId": "8f466e", "runId": "post-fix", "hypothesisId": "A", "location": "supply_chain.py:_match_fabs", "message": "matched fabs", "data": {"node_key": node_key, "count": len(results), "names": [f["name"] for f in results]}, "timestamp": int(time.time() * 1000)}) + "\n")
-        # endregion
-
         return results
 
     def _assess_geopolitical_risks(self, fabs: list[dict]) -> list[dict]:
