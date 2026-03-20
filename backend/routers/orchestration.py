@@ -178,7 +178,26 @@ def _orch_is_wxo_saas_host(orch_url: str) -> bool:
     return "watson-orchestrate." in orch_url.lower()
 
 
+def _normalize_wxo_url(orch_url: str) -> str:
+    """
+    Accept both:
+      - https://us-south.watson-orchestrate.cloud.ibm.com
+      - https://api.us-south.watson-orchestrate.cloud.ibm.com
+
+    IBM docs use the former as the {api_endpoint}; the latter often breaks
+    health/proxy paths.
+    """
+    u = orch_url.strip()
+    if "://" not in u:
+        return u
+    scheme, rest = u.split("://", 1)
+    if rest.lower().startswith("api."):
+        rest = rest[4:]
+    return f"{scheme}://{rest}"
+
+
 def _wxo_api_base(orch_url: str) -> str:
+    orch_url = _normalize_wxo_url(orch_url)
     return f"{orch_url.rstrip('/')}/api"
 
 

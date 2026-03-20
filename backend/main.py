@@ -90,6 +90,13 @@ async def _probe_watson_orchestrate(settings) -> str:
         return "NO KEY"
     orch_url = settings.watson_orchestrate_url.rstrip("/")
     wxo_saas = "watson-orchestrate." in orch_url.lower()
+    # Normalize IBM WxO SaaS base URL to match IBM docs patterns.
+    # Some configs use https://api.<region>.watson-orchestrate.cloud.ibm.com which
+    # can break /api/v1/... paths; removing the leading `api.` fixes it.
+    if "://" in orch_url:
+        scheme, rest = orch_url.split("://", 1)
+        if rest.lower().startswith("api."):
+            orch_url = f"{scheme}://{rest[4:]}"
     if wxo_saas:
         if not (settings.watson_orchestrate_agent_id or "").strip():
             return "NO AGENT ID"
