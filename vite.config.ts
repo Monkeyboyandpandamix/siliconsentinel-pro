@@ -17,6 +17,17 @@ export default defineConfig(({mode}) => {
       host: true,
       allowedHosts: true,
       hmr: process.env.DISABLE_HMR !== 'true',
+      watch: {
+        ignored: [
+          '**/.local/**',
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/uploads/**',
+          '**/*.db',
+          '**/*.db-wal',
+          '**/*.db-shm',
+        ],
+      },
       proxy: {
         '/api': {
           target: 'http://localhost:8000',
