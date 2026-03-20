@@ -1,11 +1,18 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 import os
+from pathlib import Path
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_DB_PATH = _PROJECT_ROOT / "siliconsentinel.db"
 
 
 class Settings(BaseSettings):
     app_name: str = "SiliconSentinel Pro"
-    silicon_db_url: str = "sqlite+aiosqlite:///./siliconsentinel.db"
+    # Use an absolute path so the backend never accidentally opens a
+    # different (read-only) sqlite file when the working directory changes.
+    silicon_db_url: str = f"sqlite+aiosqlite:///{_DEFAULT_DB_PATH.as_posix()}"
     ai_provider: str = "gemini"  # "gemini" | "watsonx"
     gemini_api_key: str = ""
     watsonx_api_key: str = ""
