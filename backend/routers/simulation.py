@@ -5,6 +5,7 @@ from sqlalchemy import select
 from backend.database import get_db
 from backend.models.design import Design
 from backend.schemas.simulation import SimulationRequest, SimulationResponse
+from backend.services.orchestrator import OrchestratorService
 from backend.services.simulation_engine import SimulationEngineService
 
 router = APIRouter()
@@ -19,6 +20,13 @@ async def run_simulation(design_id: int, req: SimulationRequest, db: AsyncSessio
     if not design.architecture_json:
         raise HTTPException(status_code=400, detail="Design has no architecture — generate one first")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "SIMULATION")
     service = SimulationEngineService(db)
-    sim = await service.run_simulation(design, req)
-    return sim
+    try:
+        sim = await service.run_simulation(design, req)
+        await orchestrator.complete_order(order.id, success=True)
+        return sim
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

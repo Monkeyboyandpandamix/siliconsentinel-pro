@@ -6,6 +6,7 @@ from backend.database import get_db
 from backend.models.design import Design
 from backend.schemas.bom import BOMGenerateRequest, BOMResponse
 from backend.services.bom_engine import BOMEngineService
+from backend.services.orchestrator import OrchestratorService
 
 router = APIRouter()
 
@@ -19,6 +20,13 @@ async def generate_bom(design_id: int, req: BOMGenerateRequest, db: AsyncSession
     if not design.architecture_json:
         raise HTTPException(status_code=400, detail="Design has no architecture")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "BOM")
     service = BOMEngineService(db)
-    bom = await service.generate_bom(design, req)
-    return bom
+    try:
+        bom = await service.generate_bom(design, req)
+        await orchestrator.complete_order(order.id, success=True)
+        return bom
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

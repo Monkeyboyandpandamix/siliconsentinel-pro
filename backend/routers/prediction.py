@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from backend.database import get_db
 from backend.models.design import Design
+from backend.services.orchestrator import OrchestratorService
 from backend.services.yield_predictor import YieldPredictorService
 
 router = APIRouter()
@@ -18,6 +19,13 @@ async def get_predictions(design_id: int, db: AsyncSession = Depends(get_db)):
     if not design.architecture_json:
         raise HTTPException(status_code=400, detail="Design has no architecture")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "FORECAST")
     service = YieldPredictorService(db)
-    predictions = await service.predict(design)
-    return predictions
+    try:
+        predictions = await service.predict(design)
+        await orchestrator.complete_order(order.id, success=True)
+        return predictions
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

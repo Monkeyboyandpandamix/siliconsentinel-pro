@@ -6,6 +6,7 @@ from backend.database import get_db
 from backend.models.design import Design
 from backend.schemas.design import DesignCreateRequest, DesignResponse
 from backend.services.design_copilot import DesignCopilotService
+from backend.services.orchestrator import OrchestratorService
 
 router = APIRouter()
 
@@ -13,8 +14,14 @@ router = APIRouter()
 @router.post("", response_model=DesignResponse, status_code=201)
 async def create_design(req: DesignCreateRequest, db: AsyncSession = Depends(get_db)):
     service = DesignCopilotService(db)
-    design = await service.create_design(req)
-    return design
+    try:
+        design = await service.create_design(req)
+        orchestrator = OrchestratorService(db)
+        order = await orchestrator.create_order(design.id, "DESIGN")
+        await orchestrator.complete_order(order.id, success=True)
+        return design
+    except Exception:
+        raise
 
 
 @router.get("", response_model=list[DesignResponse])

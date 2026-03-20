@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ThermalMapData, BlockSpec } from '../types';
 
 interface Props {
@@ -8,15 +8,40 @@ interface Props {
 
 export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 800, height: 450 });
 
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const updateSize = () => {
+      setSize({
+        width: Math.max(container.clientWidth, 320),
+        height: Math.max(container.clientHeight, 240),
+      });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!canvasRef.current || !containerRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const w = canvas.width;
-    const h = canvas.height;
+    const dpr = window.devicePixelRatio || 1;
+    const cssWidth = size.width;
+    const cssHeight = size.height;
+    canvas.width = Math.floor(cssWidth * dpr);
+    canvas.height = Math.floor(cssHeight * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+
+    const w = cssWidth;
+    const h = cssHeight;
     const pad = 40;
 
     ctx.fillStyle = '#09090b';
@@ -33,7 +58,7 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
     ctx.lineWidth = 2;
     ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
 
-    const grid = thermal.grid;
+    const grid = Array.isArray(thermal.grid) ? thermal.grid : [];
     const res = grid.length;
     if (res === 0) return;
 
@@ -63,10 +88,12 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
     // Block outlines + text labels
     ctx.globalCompositeOperation = 'source-over';
     blocks.forEach(block => {
+      const normalizedWidth = block.width || Math.max(6, Math.sqrt(block.area_mm2) * 8);
+      const normalizedHeight = block.height || Math.max(6, Math.sqrt(block.area_mm2) * 8);
       const bx = (block.x / 100) * (w - pad * 2) + pad;
       const by = (block.y / 100) * (h - pad * 2) + pad;
-      const bw = (block.width / 100) * (w - pad * 2);
-      const bh = (block.height / 100) * (h - pad * 2);
+      const bw = (normalizedWidth / 100) * (w - pad * 2);
+      const bh = (normalizedHeight / 100) * (h - pad * 2);
 
       ctx.strokeStyle = 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 1;
@@ -83,8 +110,10 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       if (!block) return;
       const bx = (block.x / 100) * (w - pad * 2) + pad;
       const by = (block.y / 100) * (h - pad * 2) + pad;
-      const bw = (block.width / 100) * (w - pad * 2);
-      const bh = (block.height / 100) * (h - pad * 2);
+      const normalizedWidth = block.width || Math.max(6, Math.sqrt(block.area_mm2) * 8);
+      const normalizedHeight = block.height || Math.max(6, Math.sqrt(block.area_mm2) * 8);
+      const bw = (normalizedWidth / 100) * (w - pad * 2);
+      const bh = (normalizedHeight / 100) * (h - pad * 2);
 
       ctx.fillStyle = zone.status === 'CRITICAL' ? '#ef4444' : zone.status === 'WARNING' ? '#f59e0b' : '#22c55e';
       ctx.font = 'bold 9px monospace';
@@ -92,8 +121,7 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
       ctx.fillText(`${zone.temperature_c.toFixed(0)}°C`, bx + bw / 2, by + bh / 2 + 3);
       ctx.textAlign = 'start';
     });
-
-  }, [thermal, blocks]);
+  }, [blocks, size.height, size.width, thermal]);
 
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
@@ -105,8 +133,8 @@ export const ThermalHeatmap: React.FC<Props> = ({ thermal, blocks }) => {
           {thermal.hotspot_count > 0 && <span className="text-red-400">{thermal.hotspot_count} hotspot{thermal.hotspot_count > 1 ? 's' : ''}</span>}
         </div>
       </div>
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-zinc-800">
-        <canvas ref={canvasRef} width={800} height={450} className="w-full h-full" role="img" aria-label="Thermal heatmap of chip die" />
+      <div ref={containerRef} className="relative aspect-video w-full overflow-hidden rounded-lg border border-zinc-800">
+        <canvas ref={canvasRef} className="w-full h-full" role="img" aria-label="Thermal heatmap of chip die" />
         <div className="absolute bottom-3 right-3 flex flex-col gap-0.5">
           <div className="w-24 h-2 rounded" style={{ background: 'linear-gradient(to right, #0000c8, #00b400, #ffc800, #ff0000)' }} />
           <div className="flex justify-between text-[8px] text-zinc-400 font-mono">

@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from backend.database import get_db
 from backend.models.design import Design
+from backend.services.orchestrator import OrchestratorService
 from backend.services.supply_chain import SupplyChainService
 
 router = APIRouter()
@@ -18,6 +19,13 @@ async def get_supply_chain(design_id: int, db: AsyncSession = Depends(get_db)):
     if not design.architecture_json:
         raise HTTPException(status_code=400, detail="Design has no architecture")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "SUPPLY_CHAIN")
     service = SupplyChainService(db)
-    analysis = await service.analyze(design)
-    return analysis
+    try:
+        analysis = await service.analyze(design)
+        await orchestrator.complete_order(order.id, success=True)
+        return analysis
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

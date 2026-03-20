@@ -1,6 +1,7 @@
 import React from 'react';
 import { MapContainer, TileLayer, CircleMarker, Tooltip, ZoomControl } from 'react-leaflet';
 import L from 'leaflet';
+import type { SupplyChainResponse } from '../types';
 
 // Fix for default marker icons in Leaflet with React
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -16,23 +17,64 @@ let DefaultIcon = L.icon({
 L.Marker.prototype.options.icon = DefaultIcon;
 
 interface RiskPoint {
-  coordinates: [number, number]; // [lat, lng]
-  risk: number; // 0 to 1
+  coordinates: [number, number];
+  risk: number;
   label: string;
+  country: string;
+  leadTimeWeeks?: number;
+  overallScore?: number;
+  riskLevel?: string;
 }
 
-// Mock risk data for suppliers
-const MOCK_RISK_DATA: RiskPoint[] = [
-  { coordinates: [25.0330, 121.5654], risk: 0.8, label: 'Taiwan (High Concentration)' },
-  { coordinates: [37.5665, 126.9780], risk: 0.4, label: 'South Korea' },
-  { coordinates: [22.3193, 114.1772], risk: 0.7, label: 'Shenzhen (Supply Chain Hub)' },
-  { coordinates: [37.3382, -121.8863], risk: 0.2, label: 'Silicon Valley' },
-  { coordinates: [1.3521, 103.8198], risk: 0.3, label: 'Singapore' },
-  { coordinates: [12.9716, 77.5946], risk: 0.5, label: 'Bangalore' },
-  { coordinates: [52.5200, 13.4050], risk: 0.3, label: 'Berlin' },
-];
+const COUNTRY_COORDS: Record<string, [number, number]> = {
+  Taiwan: [23.6978, 120.9605],
+  'South Korea': [36.5, 127.75],
+  'United States': [39.8283, -98.5795],
+  China: [35.8617, 104.1954],
+  Israel: [31.0461, 34.8516],
+  Singapore: [1.3521, 103.8198],
+  Germany: [51.1657, 10.4515],
+  India: [20.5937, 78.9629],
+};
 
-export const RiskMap: React.FC = () => {
+const riskScoreFromLevel = (level?: string) => {
+  switch (level) {
+    case 'LOW':
+      return 0.2;
+    case 'MEDIUM':
+      return 0.5;
+    case 'HIGH':
+      return 0.75;
+    case 'CRITICAL':
+      return 0.95;
+    default:
+      return 0.4;
+  }
+};
+
+interface Props {
+  data: SupplyChainResponse;
+}
+
+export const RiskMap: React.FC<Props> = ({ data }) => {
+  const geoByCountry = new Map(data.geopolitical_risks.map((item) => [item.region, item]));
+  const points: RiskPoint[] = data.fab_recommendations
+    .map((fab) => {
+      const geo = geoByCountry.get(fab.country);
+      const coordinates = COUNTRY_COORDS[fab.country];
+      if (!coordinates) return null;
+      return {
+        coordinates,
+        risk: 1 - fab.risk_score / 100,
+        label: fab.name,
+        country: fab.country,
+        leadTimeWeeks: fab.lead_time_weeks,
+        overallScore: fab.overall_score,
+        riskLevel: geo?.risk_level,
+      };
+    })
+    .filter((point): point is RiskPoint => point !== null);
+
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 h-[500px] relative overflow-hidden">
       <div className="absolute top-8 left-8 z-[1000] bg-zinc-950/80 backdrop-blur border border-zinc-800 p-3 rounded-lg shadow-2xl pointer-events-none">
@@ -62,7 +104,7 @@ export const RiskMap: React.FC = () => {
         />
         <ZoomControl position="bottomright" />
         
-        {MOCK_RISK_DATA.map((point, idx) => (
+        {points.map((point, idx) => (
           <CircleMarker 
             key={idx}
             center={point.coordinates}
@@ -78,11 +120,38 @@ export const RiskMap: React.FC = () => {
             <Tooltip direction="top" offset={[0, -10]} opacity={1} permanent={false}>
               <div className="bg-zinc-900 text-white p-2 rounded border border-zinc-700 text-[10px] font-mono">
                 <p className="font-bold">{point.label}</p>
+                <p className="text-zinc-400">{point.country}</p>
                 <p className="text-zinc-400">Risk Factor: {(point.risk * 100).toFixed(0)}%</p>
+                {point.overallScore !== undefined && <p className="text-zinc-400">Fab Score: {point.overallScore}/100</p>}
+                {point.leadTimeWeeks !== undefined && <p className="text-zinc-400">Lead Time: {point.leadTimeWeeks} weeks</p>}
+                {point.riskLevel && <p className="text-zinc-400">Geo Risk: {point.riskLevel}</p>}
               </div>
             </Tooltip>
           </CircleMarker>
         ))}
+        {data.geopolitical_risks
+          .filter((risk) => !points.some((point) => point.country === risk.region) && COUNTRY_COORDS[risk.region])
+          .map((risk, idx) => (
+            <CircleMarker
+              key={`geo-${idx}`}
+              center={COUNTRY_COORDS[risk.region]}
+              radius={8 + riskScoreFromLevel(risk.risk_level) * 12}
+              pathOptions={{
+                fillColor: risk.risk_level === 'CRITICAL' || risk.risk_level === 'HIGH' ? '#ef4444' : risk.risk_level === 'MEDIUM' ? '#f59e0b' : '#3b82f6',
+                color: 'white',
+                weight: 1,
+                opacity: 0.7,
+                fillOpacity: 0.35
+              }}
+            >
+              <Tooltip direction="top" offset={[0, -10]} opacity={1} permanent={false}>
+                <div className="bg-zinc-900 text-white p-2 rounded border border-zinc-700 text-[10px] font-mono">
+                  <p className="font-bold">{risk.region}</p>
+                  <p className="text-zinc-400">Geo Risk: {risk.risk_level}</p>
+                </div>
+              </Tooltip>
+            </CircleMarker>
+          ))}
       </MapContainer>
     </div>
   );

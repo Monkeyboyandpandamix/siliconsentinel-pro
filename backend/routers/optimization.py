@@ -6,6 +6,7 @@ from backend.database import get_db
 from backend.models.design import Design
 from backend.schemas.optimization import OptimizationRequest, OptimizationResponse
 from backend.services.optimizer import OptimizerService
+from backend.services.orchestrator import OrchestratorService
 
 router = APIRouter()
 
@@ -19,6 +20,13 @@ async def optimize_design(design_id: int, req: OptimizationRequest, db: AsyncSes
     if not design.architecture_json:
         raise HTTPException(status_code=400, detail="Design has no architecture")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "OPTIMIZATION")
     service = OptimizerService(db)
-    optimization = await service.optimize(design, req)
-    return optimization
+    try:
+        optimization = await service.optimize(design, req)
+        await orchestrator.complete_order(order.id, success=True)
+        return optimization
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

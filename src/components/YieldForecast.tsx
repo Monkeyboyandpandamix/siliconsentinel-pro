@@ -8,7 +8,7 @@ interface Props {
 export function YieldForecast({ predictions }: Props) {
   const { yield: yieldData, defect_zones, delay_forecast, shortage_risks } = predictions;
 
-  const yieldColor = yieldData.yield_pct >= 80 ? 'emerald' : yieldData.yield_pct >= 60 ? 'amber' : 'red';
+  const yieldColorClass = yieldData.yield_pct >= 80 ? 'text-emerald-400' : yieldData.yield_pct >= 60 ? 'text-amber-400' : 'text-red-400';
 
   return (
     <div className="space-y-4">
@@ -16,7 +16,7 @@ export function YieldForecast({ predictions }: Props) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-zinc-900/50 border border-zinc-800 p-5 rounded-xl text-center">
           <p className="text-[10px] text-zinc-500 font-mono uppercase mb-2">Estimated Yield ({yieldData.yield_model})</p>
-          <p className={`text-4xl font-bold text-${yieldColor}-400`}>{yieldData.yield_pct.toFixed(1)}%</p>
+          <p className={`text-4xl font-bold ${yieldColorClass}`}>{yieldData.yield_pct.toFixed(1)}%</p>
           <p className="text-xs text-zinc-500 mt-1">{yieldData.confidence_interval} confidence</p>
           <p className="text-[10px] text-zinc-600 mt-1">Range: {yieldData.yield_low_pct}% – {yieldData.yield_high_pct}%</p>
         </div>

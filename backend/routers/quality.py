@@ -7,6 +7,7 @@ from backend.database import get_db
 from backend.config import get_settings
 from backend.models.design import Design
 from backend.schemas.quality import QualityCheckResponse
+from backend.services.orchestrator import OrchestratorService
 from backend.services.quality_inspector import QualityInspectorService
 
 router = APIRouter()
@@ -23,6 +24,9 @@ async def run_quality_check(
     if not design:
         raise HTTPException(status_code=404, detail="Design not found")
 
+    orchestrator = OrchestratorService(db)
+    order = await orchestrator.create_order(design_id, "QC")
+
     upload_dir = get_settings().upload_dir
     os.makedirs(upload_dir, exist_ok=True)
     image_path = os.path.join(upload_dir, f"qc_{design_id}_{image.filename}")
@@ -31,5 +35,10 @@ async def run_quality_check(
         f.write(content)
 
     service = QualityInspectorService(db)
-    qc_result = await service.inspect(design, image_path)
-    return qc_result
+    try:
+        qc_result = await service.inspect(design, image_path)
+        await orchestrator.complete_order(order.id, success=True)
+        return qc_result
+    except Exception as exc:
+        await orchestrator.complete_order(order.id, success=False, error=str(exc))
+        raise

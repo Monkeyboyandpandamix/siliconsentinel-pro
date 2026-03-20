@@ -17,14 +17,20 @@ export function ManufacturabilityScore({ designId }: Props) {
 
   if (!data) return null;
 
-  const verdictColor = data.verdict === 'EXCELLENT' ? 'emerald' : data.verdict === 'GOOD' ? 'indigo' : data.verdict === 'FAIR' ? 'amber' : 'red';
+  const verdictClass = data.verdict === 'EXCELLENT'
+    ? 'text-emerald-400'
+    : data.verdict === 'GOOD'
+      ? 'text-indigo-400'
+      : data.verdict === 'FAIR'
+        ? 'text-amber-400'
+        : 'text-red-400';
 
   return (
     <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
       <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Manufacturability Score</h3>
       <div className="text-center mb-3">
-        <p className={`text-3xl font-bold text-${verdictColor}-400`}>{data.overall_score.toFixed(0)}<span className="text-base text-zinc-500">/100</span></p>
-        <p className={`text-sm font-bold text-${verdictColor}-400 mt-0.5`}>{data.label}</p>
+        <p className={`text-3xl font-bold ${verdictClass}`}>{data.overall_score.toFixed(0)}<span className="text-base text-zinc-500">/100</span></p>
+        <p className={`text-sm font-bold mt-0.5 ${verdictClass}`}>{data.label}</p>
       </div>
       <div className="space-y-1.5">
         {Object.entries(data.components).map(([key, val]) => {

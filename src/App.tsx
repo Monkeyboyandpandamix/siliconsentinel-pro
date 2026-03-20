@@ -1,10 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Cpu, Layers, Activity, Zap, ShoppingCart, Truck,
+  Cpu, Layers, Activity, ShoppingCart, Truck,
   Factory, ShieldCheck, ChevronRight, ChevronLeft,
-  Wand2, BarChart3, AlertCircle, Loader2, Send,
-  Eye, Upload, TrendingUp
+  Wand2, BarChart3, AlertCircle, Loader2, TrendingUp
 } from 'lucide-react';
 import { api } from './services/api';
 import type {
@@ -79,6 +78,16 @@ export default function App() {
   });
 
   const fontScale = { standard: 1, large: 1.15, extra_large: 1.3 }[a11y.font_size] || 1;
+
+  useEffect(() => {
+    api.getAccessibilityPrefs()
+      .then((prefs) => setA11y(prefs as AccessibilityPrefs))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.updateAccessibilityPrefs('default', a11y).catch(() => {});
+  }, [a11y]);
 
   const handleError = useCallback((e: unknown) => {
     const msg = e instanceof Error ? e.message : 'An unexpected error occurred';
@@ -550,6 +559,7 @@ export default function App() {
                   </div>
 
                   <SupplierCards fabs={supplyChain.fab_recommendations} />
+                  <RiskMap data={supplyChain} />
 
                   <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl">
                     <h3 className="text-xs uppercase font-mono text-zinc-400 mb-3">Diversification Plan</h3>
@@ -704,11 +714,24 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function PassFailBadge({ status, score }: { status: string; score: number }) {
-  const color = status === 'PASS' ? 'emerald' : status === 'WARNING' ? 'amber' : 'red';
+  const classes = status === 'PASS'
+    ? {
+        container: 'bg-emerald-500/10 border-emerald-500/30',
+        text: 'text-emerald-400',
+      }
+    : status === 'WARNING'
+      ? {
+          container: 'bg-amber-500/10 border-amber-500/30',
+          text: 'text-amber-400',
+        }
+      : {
+          container: 'bg-red-500/10 border-red-500/30',
+          text: 'text-red-400',
+        };
   return (
-    <div className={`px-3 py-1.5 bg-${color}-500/10 border border-${color}-500/30 rounded-lg flex items-center gap-2`}>
-      <ShieldCheck className={`text-${color}-400`} size={14} />
-      <span className={`text-xs font-bold text-${color}-400`}>{status} — {score.toFixed(0)}/100</span>
+    <div className={`px-3 py-1.5 border rounded-lg flex items-center gap-2 ${classes.container}`}>
+      <ShieldCheck className={classes.text} size={14} />
+      <span className={`text-xs font-bold ${classes.text}`}>{status} — {score.toFixed(0)}/100</span>
     </div>
   );
 }
